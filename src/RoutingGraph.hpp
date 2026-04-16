@@ -509,6 +509,154 @@ public:
         return g;
     }
 
+    // ---------------------------------------------------------------------------
+    // US-05: Routing validation
+    // ---------------------------------------------------------------------------
+
+    enum class ValidationSeverity
+    {
+        Error,    // Hard error — graph cannot be used for audio.
+        Warning,  // Soft warning — graph is usable but may surprise the user.
+    };
+
+    enum class ValidationCode
+    {
+        // Hard errors
+        cycle_detected,            // Graph contains a directed cycle.
+        output_index_out_of_range, // OutputBox channel index >= available outputs.
+
+        // Warnings
+        dead_branch_warning,       // Branch does not reach any OutputBox.
+        orphan_box,                // Box has no connections at all.
+    };
+
+    struct ValidationError
+    {
+        ValidationSeverity severity;
+        ValidationCode     code;
+        BoxId              boxId;     // Box involved (INVALID_BOX_ID if graph-level).
+        std::string        message;   // Human-readable description.
+
+        bool isError()   const { return severity == ValidationSeverity::Error;   }
+        bool isWarning() const { return severity == ValidationSeverity::Warning; }
+    };
+
+    struct ValidationResult
+    {
+        std::vector<ValidationError> errors;
+        std::vector<ValidationError> warnings;
+
+        bool IsValid()       const { return errors.empty(); }
+        bool HasWarnings()   const { return !warnings.empty(); }
+        bool IsClean()       const { return errors.empty() && warnings.empty(); }
+
+        void AddError(ValidationCode code, BoxId boxId, const std::string& msg)
+        {
+            errors.push_back({ ValidationSeverity::Error, code, boxId, msg });
+        }
+        void AddWarning(ValidationCode code, BoxId boxId, const std::string& msg)
+        {
+            warnings.push_back({ ValidationSeverity::Warning, code, boxId, msg });
+        }
+
+        // Merge another result into this one.
+        void Merge(const ValidationResult& other)
+        {
+            errors.insert(errors.end(), other.errors.begin(), other.errors.end());
+            warnings.insert(warnings.end(), other.warnings.begin(), other.warnings.end());
+        }
+    };
+
+    /// Validate the routing graph.
+    ///
+    /// @param availableOutputChannels  Number of physical output channels on the
+    ///                                 connected audio interface. Pass -1 to skip
+    ///                                 output channel range checks (e.g. no
+    ///                                 interface connected yet).
+    ///
+    /// Rules applied:
+    ///   ERROR   cycle_detected            — graph contains a directed cycle
+    ///   ERROR   output_index_out_of_range — OutputBox.channelIndex >= availableOutputChannels
+    ///   WARNING dead_branch_warning       — box has no path to any OutputBox
+    ///   WARNING orphan_box                — box has no connections at all
+    ValidationResult Validate(int availableOutputChannels = -1) const
+    {
+        ValidationResult result;
+
+        // ------------------------------------------------------------------
+        // 1. Cycle detection (hard error — all other checks are meaningless
+        //    if the graph has a cycle, so return early).
+        // ------------------------------------------------------------------
+        if (!IsAcyclic())
+        {
+            result.AddError(
+                ValidationCode::cycle_detected,
+                INVALID_BOX_ID,
+                "Routing graph contains a cycle. Signal flow must be directed and acyclic.");
+            return result; // remaining checks require a DAG
+        }
+
+        // ------------------------------------------------------------------
+        // 2. Output channel index range check (hard error per OutputBox).
+        // ------------------------------------------------------------------
+        if (availableOutputChannels >= 0)
+        {
+            for (const auto& b : boxes_)
+            {
+                if (b->isOutput() && b->outputChannelIndex >= availableOutputChannels)
+                {
+                    result.AddError(
+                        ValidationCode::output_index_out_of_range,
+                        b->id,
+                        "OutputBox channel index " +
+                            std::to_string(b->outputChannelIndex) +
+                            " is out of range (interface has " +
+                            std::to_string(availableOutputChannels) +
+                            " output channel(s)).");
+                }
+            }
+        }
+
+        // ------------------------------------------------------------------
+        // 3. Orphan boxes — no connections at all (warning).
+        // ------------------------------------------------------------------
+        for (const auto& b : boxes_)
+        {
+            if (IncomingCount(b->id) == 0 && OutgoingCount(b->id) == 0)
+            {
+                result.AddWarning(
+                    ValidationCode::orphan_box,
+                    b->id,
+                    "Box '" + (b->title.empty() ? b->pluginUri : b->title) +
+                        "' has no connections.");
+            }
+        }
+
+        // ------------------------------------------------------------------
+        // 4. Dead branch detection (warning).
+        //    Skip boxes that are already flagged as orphans to avoid
+        //    duplicate warnings.
+        // ------------------------------------------------------------------
+        std::unordered_set<BoxId> orphanIds;
+        for (const auto& w : result.warnings)
+            if (w.code == ValidationCode::orphan_box)
+                orphanIds.insert(w.boxId);
+
+        auto deadIds = FindDeadBranches();
+        for (BoxId deadId : deadIds)
+        {
+            if (orphanIds.count(deadId)) continue; // already warned
+            const Box* b = FindBox(deadId);
+            std::string label = b ? (b->title.empty() ? b->pluginUri : b->title) : std::to_string(deadId);
+            result.AddWarning(
+                ValidationCode::dead_branch_warning,
+                deadId,
+                "Box '" + label + "' is on a dead branch — no OutputBox is reachable downstream.");
+        }
+
+        return result;
+    }
+
 private:
     void WalkDownstreamImpl(BoxId id,
                             const std::function<void(Box*)>& visitor,

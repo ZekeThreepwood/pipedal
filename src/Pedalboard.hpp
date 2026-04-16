@@ -269,6 +269,15 @@ public:
     bool HasItem(int64_t pedalItemid) const { return GetItem(pedalItemid) != nullptr; }
     bool ApplySnapshot(int64_t snapshotIndex, PluginHost &pluginHost);
 
+    // US-05: Validate the routing graph against the current structure.
+    // Pass availableOutputChannels from the connected audio interface,
+    // or -1 to skip hardware channel range checks.
+    RoutingGraph::ValidationResult Validate(int availableOutputChannels = -1)
+    {
+        EnsureRoutingGraph();
+        return routingGraph_.Validate(availableOutputChannels);
+    }
+
     // US-03: Access the routing graph. Rebuilt lazily from items_ when dirty.
     RoutingGraph& GetRoutingGraph() { EnsureRoutingGraph(); return routingGraph_; }
     const RoutingGraph& GetRoutingGraph() const { const_cast<Pedalboard*>(this)->EnsureRoutingGraph(); return routingGraph_; }
@@ -283,6 +292,7 @@ private:
     void EnsureRoutingGraph() { if (routingGraphDirty_) RebuildRoutingGraph(); }
 
 public:
+    GETTER_SETTER_REF(name)
     GETTER_SETTER_VEC(items)
     GETTER_SETTER(input_volume_db)
     GETTER_SETTER(output_volume_db)

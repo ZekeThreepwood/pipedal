@@ -81,7 +81,6 @@ std::vector<PedalboardItem*> Pedalboard::GetAllPlugins()
 }
 
 // GetItem: still walks items_ to return a live pointer.
-// RoutingGraph::FindBox is used as a fast existence check first.
 const PedalboardItem* Pedalboard::GetItem(int64_t pedalItemId) const
 {
     return GetItem_(this->items(), pedalItemId);
@@ -204,20 +203,13 @@ PedalboardItem Pedalboard::MakeSplit()
 
     result.topChain().push_back(MakeEmptyItem());
     result.bottomChain().push_back(MakeEmptyItem());
-    result.controlValues().push_back(
-        ControlValue(SPLIT_SPLITTYPE_KEY,0));
-    result.controlValues().push_back(
-        ControlValue(SPLIT_SELECT_KEY,0));
-    result.controlValues().push_back(
-        ControlValue(SPLIT_MIX_KEY,0));
-    result.controlValues().push_back(
-        ControlValue(SPLIT_PANL_KEY,0));
-    result.controlValues().push_back(
-        ControlValue(SPLIT_VOLL_KEY,-3));
-    result.controlValues().push_back(
-        ControlValue(SPLIT_PANR_KEY,0));
-    result.controlValues().push_back(
-        ControlValue(SPLIT_VOLR_KEY,-3));
+    result.controlValues().push_back(ControlValue(SPLIT_SPLITTYPE_KEY,0));
+    result.controlValues().push_back(ControlValue(SPLIT_SELECT_KEY,0));
+    result.controlValues().push_back(ControlValue(SPLIT_MIX_KEY,0));
+    result.controlValues().push_back(ControlValue(SPLIT_PANL_KEY,0));
+    result.controlValues().push_back(ControlValue(SPLIT_VOLL_KEY,-3));
+    result.controlValues().push_back(ControlValue(SPLIT_PANR_KEY,0));
+    result.controlValues().push_back(ControlValue(SPLIT_VOLR_KEY,-3));
     
     return result;
 }
@@ -242,18 +234,7 @@ bool IsPedalboardSplitItem(const PedalboardItem*self, const std::vector<Pedalboa
 }
 
 // ---------------------------------------------------------------------------
-// US-03: RoutingGraph builder — converts the legacy items_/topChain/bottomChain
-// tree into a RoutingGraph. Called lazily whenever routingGraphDirty_ is true.
-//
-// Mapping rules:
-//   - Each non-empty PedalboardItem becomes a PluginBox (uri preserved).
-//   - A split PedalboardItem becomes a PluginBox for the split node itself,
-//     then its topChain and bottomChain items are added as downstream branches
-//     (fan-out via multiple connections from the split box).
-//   - The last box in each chain connects to a shared OutputBox(0) representing
-//     the legacy single stereo output.
-//   - Empty items (EMPTY_PEDALBOARD_ITEM_URI) are included as PluginBoxes so
-//     instanceId-based lookup still works during the migration period.
+// US-03: RoutingGraph builder
 // ---------------------------------------------------------------------------
 
 void Pedalboard::BuildRoutingGraphFromItems(
@@ -270,12 +251,10 @@ void Pedalboard::BuildRoutingGraphFromItems(
         box->title      = item.title();
         box->iconColor  = item.iconColor();
 
-        // Map legacy split type to Ab or Merge as appropriate.
         if (item.isSplit())
         {
             auto cv = item.GetControlValue(SPLIT_SPLITTYPE_KEY);
             float splitTypeVal = cv ? cv->value() : 0.0f;
-            // splitType 0 = A/B select → Ab; 1 = Mix → Merge; 2 = L/R → Merge
             box->type = (splitTypeVal == 0.0f) ? BoxType::Ab : BoxType::Merge;
         }
         else
@@ -283,14 +262,11 @@ void Pedalboard::BuildRoutingGraphFromItems(
             box->type = BoxType::Plugin;
         }
 
-        // Copy control values.
         for (const auto& cv : item.controlValues())
         {
             box->controlValues.emplace_back(cv.key(), cv.value());
         }
 
-        // Keep the same BoxId as the instanceId so FindBox(instanceId) works.
-        // We must ensure nextBoxId_ stays above all assigned ids.
         if (box->id >= routingGraph_.nextBoxId_)
             routingGraph_.nextBoxId_ = box->id + 1;
 
@@ -301,7 +277,6 @@ void Pedalboard::BuildRoutingGraphFromItems(
 
         if (item.isSplit())
         {
-            // Fan-out: both chains branch from this split box.
             BuildRoutingGraphFromItems(item.topChain(),    box->id);
             BuildRoutingGraphFromItems(item.bottomChain(), box->id);
         }
@@ -317,25 +292,13 @@ void Pedalboard::RebuildRoutingGraph()
     routingGraph_ = RoutingGraph();
     routingGraph_.name = name_;
 
-    // Add a single legacy output box representing the stereo hardware output.
-    // During the migration period there is always exactly one output (stereo).
     auto outputBox = routingGraph_.MakeOutputBox(0);
     outputBox->title = "Output";
     routingGraph_.boxes_.push_back(outputBox);
     BoxId outputId = outputBox->id;
 
-    // Walk the items tree and build boxes + connections.
-    // The last item in the top-level chain connects to the output.
-    // We do a two-pass: first build the tree, then connect the last
-    // top-level item's leaf boxes to the output.
-    //
-    // Simple approach: build from root with INVALID_BOX_ID as upstream,
-    // then connect any box with no outgoing connections (that isn't the
-    // output box itself) to the output.
-
     BuildRoutingGraphFromItems(items_, INVALID_BOX_ID);
 
-    // Connect all leaf boxes (no outgoing connections, not the output) to output.
     for (const auto& b : routingGraph_.boxes_)
     {
         if (b->id == outputId) continue;
@@ -401,7 +364,6 @@ void PedalboardItem::ApplyDefaultValues(PluginHost&pluginHost)
         {
             this->SetControlValue(port->symbol(),port->default_value());
         }
-        // a cheat. this isn't actually true, but close enough.
         for (auto &pathProperty: this->pathProperties_)
         {
             pathProperties_[pathProperty.first] = AtomConverter::EmptyPathstring();
@@ -436,20 +398,18 @@ void PedalboardItem::ApplySnapshotValue(SnapshotValue*snapshotValue)
         if (property.second == "null")
         {
             this->pathProperties_[property.first] = AtomConverter::EmptyPathstring();
-
         } else {
             this->pathProperties_[property.first] = property.second;
         }
     }
     this->isEnabled(snapshotValue->isEnabled_);
-
 }
 
 
-// can we just send a snapshot-style uddate instead of reloading plugins? All settings are ignored.
+// can we just send a snapshot-style update instead of reloading plugins? All settings are ignored.
 bool Pedalboard::IsStructureIdentical(const Pedalboard &other) const
 {
-    if (this->nextInstanceId_ != other.nextInstanceId_) // quick check that catches 95% of structural changes.
+    if (this->nextInstanceId_ != other.nextInstanceId_)
     {
         return false;
     }
@@ -469,7 +429,7 @@ bool Pedalboard::IsStructureIdentical(const Pedalboard &other) const
 
 bool PedalboardItem::IsStructurallyIdentical(const PedalboardItem&other) const
 {
-    if (this->instanceId() != other.instanceId()) // must match in order to ensure that realtime message passing works.
+    if (this->instanceId() != other.instanceId())
     {
         return false;
     }
@@ -481,19 +441,16 @@ bool PedalboardItem::IsStructurallyIdentical(const PedalboardItem&other) const
     {
         return false;
     }
-    if (this->isSplit()) // so is the other by virtue of idential uris.
+    if (this->isSplit())
     {
-
-        // // split type changes potentially trigger buffer allocation changes, 
-        // // so different split types are not structurally identical.
-
         auto myValue = this->GetControlValue("splitType");
         auto otherValue = other.GetControlValue("splitType");
-        if (myValue == nullptr || otherValue == nullptr) // actually an error.
+        if (myValue == nullptr || otherValue == nullptr)
         {
             return false;
         }
-        if (myValue->value() != otherValue->value()) {
+        if (myValue->value() != otherValue->value())
+        {
             return false; 
         }
         if (topChain().size() != other.topChain().size())
@@ -502,19 +459,21 @@ bool PedalboardItem::IsStructurallyIdentical(const PedalboardItem&other) const
         }
         for (size_t i = 0; i < topChain().size(); ++i)
         {
-            if (!topChain()[i].IsStructurallyIdentical(other.topChain()[i] ))
+            if (!topChain()[i].IsStructurallyIdentical(other.topChain()[i]))
             {
                 return false;
             }
         }
+        // FIX: size-mismatch guard and item loop were previously inverted.
         if (bottomChain().size() != other.bottomChain().size())
         {
-            for (size_t i = 0; i < bottomChain().size(); ++i)
+            return false;
+        }
+        for (size_t i = 0; i < bottomChain().size(); ++i)
+        {
+            if (!bottomChain()[i].IsStructurallyIdentical(other.bottomChain()[i]))
             {
-                if (!bottomChain()[i].IsStructurallyIdentical(other.bottomChain()[i]))
-                {
-                    return false;
-                }
+                return false;
             }
         }
     }
@@ -542,7 +501,7 @@ void PedalboardItem::AddToSnapshotFromCurrentSettings(Snapshot&snapshot) const
     {
         for (auto&item: this->topChain_)
         {
-            item.AddToSnapshotFromCurrentSettings(snapshot);;
+            item.AddToSnapshotFromCurrentSettings(snapshot);
         }
         for (auto&item: this->bottomChain_)
         {
@@ -553,8 +512,6 @@ void PedalboardItem::AddToSnapshotFromCurrentSettings(Snapshot&snapshot) const
 
 void PedalboardItem::AddResetsForMissingProperties(Snapshot&snapshot, size_t*index) const
 {
-    // structure must be identical
-    // items must be enumerated in the same order as AddToSnapshotFromCurrentSettings
     SnapshotValue&snapshotValue = snapshot.values_[*index];
     
     if (snapshotValue.instanceId_ != this->instanceId())
@@ -583,7 +540,6 @@ void PedalboardItem::AddResetsForMissingProperties(Snapshot&snapshot, size_t*ind
             item.AddResetsForMissingProperties(snapshot,index);
         }
     }
-
 }
 
 Pedalboard Pedalboard::DeepCopy()
@@ -599,7 +555,8 @@ Pedalboard Pedalboard::DeepCopy()
     result.MarkRoutingGraphDirty(); // US-03: force graph rebuild in the copy.
     return result;
 }
-void  Pedalboard::SetCurrentSnapshotModified(bool modified)
+
+void Pedalboard::SetCurrentSnapshotModified(bool modified)
 {
     if (selectedSnapshot() != -1)
     {
@@ -614,22 +571,12 @@ void  Pedalboard::SetCurrentSnapshotModified(bool modified)
 Snapshot Pedalboard::MakeSnapshotFromCurrentSettings(const Pedalboard &previousPedalboard)
 {
     Snapshot snapshot;
-    // name and color don't matter. this is strictly for loading purposes.
     auto items = this->GetAllPlugins();
     for (auto item : items)
     {
         item->AddToSnapshotFromCurrentSettings(snapshot);
     }
-    // a neccesary precondition: the previous pedalboard must have identical structure, 
-    // so we can just 
-    // auto items = this->GetAllPlugins();
-
-    // for (auto&item: previousPedalboard.items_)
-    // {
-    //     item.AddResetsForMissingProperties(snapshot,&index);
-    // }
     return snapshot;
-
 }
 
 
@@ -687,5 +634,3 @@ JSON_MAP_BEGIN(Snapshot)
     JSON_MAP_REFERENCE(Snapshot,color)
     JSON_MAP_REFERENCE(Snapshot,values)
 JSON_MAP_END()
-
-
