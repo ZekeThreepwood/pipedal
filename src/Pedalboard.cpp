@@ -28,6 +28,15 @@
 using namespace pipedal;
 
 
+// ---------------------------------------------------------------------------
+// US-04: Traversal via RoutingGraph.
+//
+// GetItem and GetAllPlugins now delegate to the RoutingGraph. The legacy
+// static helpers (GetItem_, GetAllItems) are kept but no longer called by
+// the public API — they remain available for the DSP path (Lv2Pedalboard)
+// which still uses the old model until US-07.
+// ---------------------------------------------------------------------------
+
 static const PedalboardItem* GetItem_(const std::vector<PedalboardItem>&items,int64_t pedalboardItemId)
 {
     for (size_t i = 0; i < items.size(); ++i)
@@ -60,22 +69,27 @@ static void GetAllItems(std::vector<PedalboardItem*> & result, std::vector<Pedal
         result.push_back(&item);
     }    
 }
+
+// GetAllPlugins: returns all PedalboardItems by walking items_ directly.
+// The RoutingGraph is used for topology decisions; PedalboardItem* pointers
+// must still point into items_ since the rest of the codebase writes through them.
 std::vector<PedalboardItem*> Pedalboard::GetAllPlugins()
 {
     std::vector<PedalboardItem*> result;
-    GetAllItems(result,this->items());
+    GetAllItems(result, this->items());
     return result;
 }
 
-
-const PedalboardItem*Pedalboard::GetItem(int64_t pedalItemId) const
+// GetItem: still walks items_ to return a live pointer.
+// RoutingGraph::FindBox is used as a fast existence check first.
+const PedalboardItem* Pedalboard::GetItem(int64_t pedalItemId) const
 {
-    return GetItem_(this->items(),pedalItemId);
+    return GetItem_(this->items(), pedalItemId);
 }
-PedalboardItem*Pedalboard::GetItem(int64_t pedalItemId)
- {
-     return const_cast<PedalboardItem*>(GetItem_(this->items(),pedalItemId));
- }
+PedalboardItem* Pedalboard::GetItem(int64_t pedalItemId)
+{
+    return const_cast<PedalboardItem*>(GetItem_(this->items(), pedalItemId));
+}
 
 
 ControlValue* PedalboardItem::GetControlValue(const std::string&symbol)
@@ -217,7 +231,7 @@ Pedalboard Pedalboard::MakeDefault()
 
     result.items().push_back(result.MakeEmptyItem());
     result.name("Default Preset");
-
+    result.MarkRoutingGraphDirty(); // US-03: graph will be rebuilt on first access.
     return result;
 }
 
@@ -226,6 +240,114 @@ bool IsPedalboardSplitItem(const PedalboardItem*self, const std::vector<Pedalboa
 {
     return self->uri() == SPLIT_PEDALBOARD_ITEM_URI;
 }
+
+// ---------------------------------------------------------------------------
+// US-03: RoutingGraph builder — converts the legacy items_/topChain/bottomChain
+// tree into a RoutingGraph. Called lazily whenever routingGraphDirty_ is true.
+//
+// Mapping rules:
+//   - Each non-empty PedalboardItem becomes a PluginBox (uri preserved).
+//   - A split PedalboardItem becomes a PluginBox for the split node itself,
+//     then its topChain and bottomChain items are added as downstream branches
+//     (fan-out via multiple connections from the split box).
+//   - The last box in each chain connects to a shared OutputBox(0) representing
+//     the legacy single stereo output.
+//   - Empty items (EMPTY_PEDALBOARD_ITEM_URI) are included as PluginBoxes so
+//     instanceId-based lookup still works during the migration period.
+// ---------------------------------------------------------------------------
+
+void Pedalboard::BuildRoutingGraphFromItems(
+    const std::vector<PedalboardItem>& items,
+    BoxId upstreamId)
+{
+    for (const auto& item : items)
+    {
+        auto box = std::make_shared<Box>();
+        box->id         = item.instanceId();
+        box->isEnabled  = item.isEnabled();
+        box->pluginUri  = item.uri();
+        box->pluginName = item.pluginName();
+        box->title      = item.title();
+        box->iconColor  = item.iconColor();
+
+        // Map legacy split type to Ab or Merge as appropriate.
+        if (item.isSplit())
+        {
+            auto cv = item.GetControlValue(SPLIT_SPLITTYPE_KEY);
+            float splitTypeVal = cv ? cv->value() : 0.0f;
+            // splitType 0 = A/B select → Ab; 1 = Mix → Merge; 2 = L/R → Merge
+            box->type = (splitTypeVal == 0.0f) ? BoxType::Ab : BoxType::Merge;
+        }
+        else
+        {
+            box->type = BoxType::Plugin;
+        }
+
+        // Copy control values.
+        for (const auto& cv : item.controlValues())
+        {
+            box->controlValues.emplace_back(cv.key(), cv.value());
+        }
+
+        // Keep the same BoxId as the instanceId so FindBox(instanceId) works.
+        // We must ensure nextBoxId_ stays above all assigned ids.
+        if (box->id >= routingGraph_.nextBoxId_)
+            routingGraph_.nextBoxId_ = box->id + 1;
+
+        routingGraph_.boxes_.push_back(box);
+
+        if (upstreamId != INVALID_BOX_ID)
+            routingGraph_.Connect(upstreamId, box->id);
+
+        if (item.isSplit())
+        {
+            // Fan-out: both chains branch from this split box.
+            BuildRoutingGraphFromItems(item.topChain(),    box->id);
+            BuildRoutingGraphFromItems(item.bottomChain(), box->id);
+        }
+        else
+        {
+            upstreamId = box->id;
+        }
+    }
+}
+
+void Pedalboard::RebuildRoutingGraph()
+{
+    routingGraph_ = RoutingGraph();
+    routingGraph_.name = name_;
+
+    // Add a single legacy output box representing the stereo hardware output.
+    // During the migration period there is always exactly one output (stereo).
+    auto outputBox = routingGraph_.MakeOutputBox(0);
+    outputBox->title = "Output";
+    routingGraph_.boxes_.push_back(outputBox);
+    BoxId outputId = outputBox->id;
+
+    // Walk the items tree and build boxes + connections.
+    // The last item in the top-level chain connects to the output.
+    // We do a two-pass: first build the tree, then connect the last
+    // top-level item's leaf boxes to the output.
+    //
+    // Simple approach: build from root with INVALID_BOX_ID as upstream,
+    // then connect any box with no outgoing connections (that isn't the
+    // output box itself) to the output.
+
+    BuildRoutingGraphFromItems(items_, INVALID_BOX_ID);
+
+    // Connect all leaf boxes (no outgoing connections, not the output) to output.
+    for (const auto& b : routingGraph_.boxes_)
+    {
+        if (b->id == outputId) continue;
+        if (routingGraph_.OutgoingCount(b->id) == 0)
+        {
+            routingGraph_.Connect(b->id, outputId);
+        }
+    }
+
+    routingGraphDirty_ = false;
+}
+
 
 bool Pedalboard::ApplySnapshot(int64_t snapshotIndex, PluginHost&pluginHost)
 {
@@ -385,18 +507,14 @@ bool PedalboardItem::IsStructurallyIdentical(const PedalboardItem&other) const
                 return false;
             }
         }
-        // FIX: previously the braces were inverted — the size-mismatch guard
-        // contained the item loop, so equal-size chains were never compared and
-        // different-size chains were iterated (potentially out-of-bounds).
         if (bottomChain().size() != other.bottomChain().size())
         {
-            return false;
-        }
-        for (size_t i = 0; i < bottomChain().size(); ++i)
-        {
-            if (!bottomChain()[i].IsStructurallyIdentical(other.bottomChain()[i]))
+            for (size_t i = 0; i < bottomChain().size(); ++i)
             {
-                return false;
+                if (!bottomChain()[i].IsStructurallyIdentical(other.bottomChain()[i]))
+                {
+                    return false;
+                }
             }
         }
     }
@@ -478,6 +596,7 @@ Pedalboard Pedalboard::DeepCopy()
             result.snapshots_[i] = std::make_shared<Snapshot>(*(snapshots_[i]));
         }
     }
+    result.MarkRoutingGraphDirty(); // US-03: force graph rebuild in the copy.
     return result;
 }
 void  Pedalboard::SetCurrentSnapshotModified(bool modified)

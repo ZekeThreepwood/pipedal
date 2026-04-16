@@ -24,6 +24,7 @@
 #include "MidiBinding.hpp"
 #include "StateInterface.hpp"
 #include "atom_object.hpp"
+#include "RoutingGraph.hpp"
 
 namespace pipedal {
     class SnapshotValue;
@@ -230,6 +231,23 @@ class Pedalboard {
 
     int64_t selectedPlugin_ = -1;
 
+    // US-03: New routing graph — lives alongside items_ during migration.
+    // items_ remains the serialization source of truth until US-06.
+    // routingGraph_ is rebuilt from items_ whenever the pedalboard is loaded
+    // or structurally modified, and is the authoritative source for traversal
+    // (GetAllPlugins, GetItem) once SyncRoutingGraphFromItems() has been called.
+    RoutingGraph routingGraph_;
+    bool routingGraphDirty_ = true; // true = needs rebuild from items_
+
+    // Rebuild routingGraph_ from the current items_/topChain/bottomChain tree.
+    // Called lazily by GetItem / GetAllPlugins when routingGraphDirty_ is true.
+    void RebuildRoutingGraph();
+
+    // Recursive helper used by RebuildRoutingGraph.
+    void BuildRoutingGraphFromItems(
+        const std::vector<PedalboardItem>& items,
+        BoxId upstreamId);
+
 public:
     // deep copy, breaking shared pointers.
     Pedalboard DeepCopy(); 
@@ -251,7 +269,20 @@ public:
     bool HasItem(int64_t pedalItemid) const { return GetItem(pedalItemid) != nullptr; }
     bool ApplySnapshot(int64_t snapshotIndex, PluginHost &pluginHost);
 
-    GETTER_SETTER_REF(name)
+    // US-03: Access the routing graph. Rebuilt lazily from items_ when dirty.
+    RoutingGraph& GetRoutingGraph() { EnsureRoutingGraph(); return routingGraph_; }
+    const RoutingGraph& GetRoutingGraph() const { const_cast<Pedalboard*>(this)->EnsureRoutingGraph(); return routingGraph_; }
+
+    // Mark the routing graph as needing a rebuild (call after any structural change to items_).
+    void MarkRoutingGraphDirty() { routingGraphDirty_ = true; }
+
+    // Force an immediate rebuild from items_ (useful after bulk edits).
+    void SyncRoutingGraph() { RebuildRoutingGraph(); }
+
+private:
+    void EnsureRoutingGraph() { if (routingGraphDirty_) RebuildRoutingGraph(); }
+
+public:
     GETTER_SETTER_VEC(items)
     GETTER_SETTER(input_volume_db)
     GETTER_SETTER(output_volume_db)

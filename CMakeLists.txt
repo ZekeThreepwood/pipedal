@@ -415,6 +415,7 @@ add_executable(pipedaltest
 
     PedalboardStructureTest.cpp
     RoutingGraphTest.cpp
+    PedalboardRoutingTest.cpp
 
     ModGuiTest.cpp
     PipewireInputStreamTest.cpp
