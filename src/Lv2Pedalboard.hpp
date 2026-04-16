@@ -119,6 +119,41 @@ namespace pipedal
         int CalculateChainInputs(const std::vector<float *> &inputBuffers, const std::vector<PedalboardItem> &items);
         void AppendParameterRequest(uint8_t *atomBuffer, LV2_URID uridParameter);
 
+        // US-07: New routing-graph-based preparation (Phase A).
+        // Uses RoutingGraph topology instead of topChain/bottomChain recursion.
+        // Populates realtimeEffects, processActions, pedalboardOutputBuffers identically
+        // to PrepareItems so that Run(), MIDI, and VU remain unchanged.
+        using BoxBufferMap = std::unordered_map<BoxId, std::vector<float*>>;
+
+        // Create/reuse an IEffect for a PluginBox. Returns nullptr on failure.
+        std::shared_ptr<IEffect> PreparePluginBox(
+            const Box& box,
+            const PedalboardItem* item,
+            std::vector<float*> inputBuffers,
+            Lv2PedalboardErrorList& errorList,
+            ExistingEffectMap* existingEffects);
+
+        // Wire a prepared effect into processActions; return its output buffers.
+        std::vector<float*> WireEffect(
+            std::shared_ptr<IEffect> pEffect,
+            const PedalboardItem* item,
+            std::vector<float*> inputBuffers);
+
+        // Sum N incoming buffer sets with -20*log10(N) dB compensation.
+        std::vector<float*> SumInputBuffers(
+            const std::vector<std::vector<float*>>& incomingSets,
+            int nChannels);
+
+        // Main new-path entry point.
+        void PrepareFromRoutingGraph(
+            Pedalboard& pedalboard,
+            Lv2PedalboardErrorList& errorList,
+            ExistingEffectMap* existingEffects);
+
+        // Phase B: flip to true to activate the new DSP path.
+        bool useRoutingGraphPath_ = false;
+
+
     public:
         Lv2Pedalboard() {}
         ~Lv2Pedalboard() {}

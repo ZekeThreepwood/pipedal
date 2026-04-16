@@ -29,6 +29,10 @@
 #include "Lv2Log.hpp"
 #include "CrashGuard.hpp"
 #include "restrict.hpp"
+#include <cmath>
+#include <algorithm>
+#include <cmath>
+#include <algorithm>
 
 using namespace pipedal;
 
@@ -334,26 +338,378 @@ void Lv2Pedalboard::Prepare(IHost *pHost, Pedalboard &pedalboard, Lv2PedalboardE
         this->pedalboardInputBuffers.push_back(bufferPool.AllocateBuffer<float>(pHost->GetMaxAudioBufferSize()));
     }
 
-    auto outputs = PrepareItems(pedalboard.items(), this->pedalboardInputBuffers, errorList, existingEffects);
-    int nOutputs = pHost->GetNumberOfOutputAudioChannels();
-    if (nOutputs == 1)
+    // US-07: Route to new path or legacy path based on flag.
+    if (useRoutingGraphPath_)
     {
-        this->pedalboardOutputBuffers.push_back(outputs[0]);
+        PrepareFromRoutingGraph(pedalboard, errorList, existingEffects);
     }
     else
     {
-        if (outputs.size() == 1)
+        auto outputs = PrepareItems(pedalboard.items(), this->pedalboardInputBuffers, errorList, existingEffects);
+        int nOutputs = pHost->GetNumberOfOutputAudioChannels();
+        if (nOutputs == 1)
         {
-            this->pedalboardOutputBuffers.push_back(outputs[0]);
             this->pedalboardOutputBuffers.push_back(outputs[0]);
         }
         else
         {
-            this->pedalboardOutputBuffers.push_back(outputs[0]);
-            this->pedalboardOutputBuffers.push_back(outputs[1]);
+            if (outputs.size() == 1)
+            {
+                this->pedalboardOutputBuffers.push_back(outputs[0]);
+                this->pedalboardOutputBuffers.push_back(outputs[0]);
+            }
+            else
+            {
+                this->pedalboardOutputBuffers.push_back(outputs[0]);
+                this->pedalboardOutputBuffers.push_back(outputs[1]);
+            }
         }
     }
     PrepareMidiMap(pedalboard);
+}
+
+
+// ---------------------------------------------------------------------------
+// US-07 Phase A: PrepareFromRoutingGraph and helpers
+//
+// These functions implement the new DSP preparation path that starts from
+// RoutingGraph topology instead of the legacy topChain/bottomChain recursion.
+//
+// Key design decisions:
+//   - TopologicalSort gives us the correct execution order (upstream before downstream).
+//   - Fan-out: the output buffers of a box are shared (read-only) by all downstream boxes.
+//   - Fan-in: multiple upstream buffer sets are summed into new mix buffers with
+//     -20*log10(N) dB compensation before being passed to the downstream box.
+//   - OutputBox: maps directly to pedalboardOutputBuffers[channelIndex].
+//   - The realtimeEffects list is populated in topological order so that
+//     GetIndexOfInstanceId(), GetEffect(), MIDI, and VU all work unchanged.
+// ---------------------------------------------------------------------------
+
+// Sum N incoming buffer sets into a fresh set of mix buffers.
+// Applies -20*log10(N) dB gain compensation when N > 1.
+std::vector<float*> Lv2Pedalboard::SumInputBuffers(
+    const std::vector<std::vector<float*>>& incomingSets,
+    int nChannels)
+{
+    if (incomingSets.size() == 1)
+        return incomingSets[0]; // no summing needed
+
+    float gainLinear = std::pow(10.0f,
+        RoutingGraph::ImplicitFanInCompensationDb((int)incomingSets.size()) / 20.0f);
+
+    std::vector<float*> mixed = AllocateAudioBuffers(nChannels);
+    size_t bufSize = pHost->GetMaxAudioBufferSize();
+
+    for (int ch = 0; ch < nChannels; ++ch)
+    {
+        // Zero the mix buffer first.
+        std::fill(mixed[ch], mixed[ch] + bufSize, 0.0f);
+        for (const auto& bufSet : incomingSets)
+        {
+            if (ch < (int)bufSet.size())
+            {
+                float* src = bufSet[ch];
+                float* dst = mixed[ch];
+                for (size_t s = 0; s < bufSize; ++s)
+                    dst[s] += src[s] * gainLinear;
+            }
+        }
+    }
+    return mixed;
+}
+
+// Create or reuse an IEffect for a PluginBox, connect its audio inputs,
+// and register it in effects/realtimeEffects.
+// Returns the effect (may be nullptr if creation failed).
+std::shared_ptr<IEffect> Lv2Pedalboard::PreparePluginBox(
+    const Box& box,
+    const PedalboardItem* item,
+    std::vector<float*> inputBuffers,
+    Lv2PedalboardErrorList& errorList,
+    ExistingEffectMap* existingEffects)
+{
+    if (!item) return nullptr;
+    if (item->isEmpty()) return nullptr;
+
+    std::shared_ptr<IEffect> pEffect;
+
+    // Try to reuse an existing effect (hot-reload optimisation).
+    if (existingEffects && existingEffects->contains(item->instanceId()))
+    {
+        pEffect = existingEffects->at(item->instanceId());
+        ((Lv2Effect*)pEffect.get())->SetBorrowedEffect(true);
+    }
+    else
+    {
+        try
+        {
+            pEffect = std::shared_ptr<IEffect>(this->pHost->CreateEffect(const_cast<PedalboardItem&>(*item)));
+        }
+        catch (const std::exception& e)
+        {
+            Lv2Log::warning(SS(e.what()));
+        }
+
+        if (pEffect && pEffect->HasErrorMessage())
+        {
+            std::string error = pEffect->TakeErrorMessage();
+            Lv2Log::error(error);
+            errorList.push_back({item->instanceId(), error});
+        }
+    }
+
+    if (!pEffect) return nullptr;
+
+    pEffect->PrepareNoInputEffect((int)inputBuffers.size(), pHost->GetMaxAudioBufferSize());
+
+    // Connect audio inputs — mirrors PrepareItems logic exactly.
+    if (inputBuffers.size() == 1)
+    {
+        if (pEffect->GetNumberOfInputAudioBuffers() >= 1)
+            pEffect->SetAudioInputBuffer(0, inputBuffers[0]);
+        if (pEffect->GetNumberOfInputAudioBuffers() >= 2)
+            pEffect->SetAudioInputBuffer(1, inputBuffers[0]); // mono→stereo: duplicate
+    }
+    else // stereo input
+    {
+        if (pEffect->GetNumberOfInputAudioBuffers() >= 1)
+            pEffect->SetAudioInputBuffer(0, inputBuffers[0]);
+        if (pEffect->GetNumberOfInputAudioBuffers() >= 2)
+            pEffect->SetAudioInputBuffer(1, inputBuffers[1]);
+    }
+
+    // Connect sidechain — mirrors PrepareItems exactly.
+    if (pEffect->GetNumberOfSidechainAudioBuffers() != 0)
+    {
+        if (item->sideChainInputId() == -2)
+        {
+            for (size_t i = 0; i < pEffect->GetNumberOfSidechainAudioBuffers(); ++i)
+            {
+                size_t idx = std::min(i, this->pedalboardInputBuffers.size() - 1);
+                pEffect->SetAudioSidechainBuffer(i, this->pedalboardInputBuffers[idx]);
+            }
+        }
+        else if (item->sideChainInputId() != -1)
+        {
+            IEffect* pSide = GetEffect(item->sideChainInputId());
+            if (pSide)
+            {
+                for (size_t i = 0; i < pEffect->GetNumberOfSidechainAudioBuffers(); ++i)
+                {
+                    size_t idx = std::min(i, (size_t)pSide->GetNumberOfOutputAudioBuffers() - 1);
+                    pEffect->SetAudioSidechainBuffer(i, pSide->GetAudioOutputBuffer((int)idx));
+                }
+            }
+        }
+        else
+        {
+            if (!this->pedalboardSidechainBuffer)
+                this->pedalboardSidechainBuffer = CreateNewAudioBuffer();
+            for (size_t i = 0; i < pEffect->GetNumberOfSidechainAudioBuffers(); ++i)
+                pEffect->SetAudioSidechainBuffer(i, this->pedalboardSidechainBuffer);
+        }
+    }
+
+    return pEffect;
+}
+
+// Wire an effect into processActions and return its output buffers.
+std::vector<float*> Lv2Pedalboard::WireEffect(
+    std::shared_ptr<IEffect> pEffect,
+    const PedalboardItem* item,
+    std::vector<float*> inputBuffers)
+{
+    // Allocate output buffers.
+    std::vector<float*> outputBuffers;
+    int nOut = pEffect->GetNumberOfOutputAudioBuffers();
+    if (nOut == 1)
+        outputBuffers.push_back(CreateNewAudioBuffer());
+    else if (nOut >= 2)
+    {
+        outputBuffers.push_back(CreateNewAudioBuffer());
+        outputBuffers.push_back(CreateNewAudioBuffer());
+    }
+    for (int i = 0; i < (int)outputBuffers.size(); ++i)
+        pEffect->SetAudioOutputBuffer(i, outputBuffers[i]);
+
+    // Register effect.
+    this->effects.push_back(pEffect);
+    this->realtimeEffects.push_back(pEffect.get());
+
+    // Add to process actions — mirrors PrepareItems exactly.
+    bool requiresBufferStaging = false;
+    if (pEffect->IsLv2Effect())
+    {
+        Lv2Effect* lv2Effect = (Lv2Effect*)pEffect.get();
+        if (lv2Effect->RequiresBufferStaging())
+        {
+            requiresBufferStaging = true;
+            this->processActions.push_back(
+                [lv2Effect, this](uint32_t frames)
+                { lv2Effect->RunWithBufferStaging(frames, this->ringBufferWriter); });
+        }
+    }
+    if (!requiresBufferStaging)
+    {
+        auto pEffectCopy = pEffect;
+        this->processActions.push_back(
+            [pEffectCopy, this](uint32_t frames)
+            { pEffectCopy->Run(frames, this->ringBufferWriter); });
+    }
+
+    // Trigger reset actions.
+    if (item && pEffect->IsLv2Effect())
+    {
+        Lv2Effect* lv2Effect = (Lv2Effect*)pEffect.get();
+        auto pluginInfo = pHost->GetPluginInfo(item->uri());
+        if (pluginInfo)
+        {
+            for (auto control : pluginInfo->ports())
+            {
+                if (control->trigger_property() && control->is_input() && control->is_control_port())
+                {
+                    int controlIndex = lv2Effect->GetControlIndex(control->symbol());
+                    if (controlIndex >= 0)
+                    {
+                        float defaultValue = control->default_value();
+                        this->processActions.push_back(
+                            [pEffectCopy = pEffect, controlIndex, defaultValue](int32_t frames)
+                            { pEffectCopy->SetControl(controlIndex, defaultValue); });
+                    }
+                }
+            }
+        }
+    }
+
+    return outputBuffers;
+}
+
+// Main new-path preparation method.
+// Walks the RoutingGraph in topological order, instantiates effects,
+// handles fan-in (summing) and fan-out (buffer sharing), and maps
+// OutputBoxes directly to pedalboardOutputBuffers.
+void Lv2Pedalboard::PrepareFromRoutingGraph(
+    Pedalboard& pedalboard,
+    Lv2PedalboardErrorList& errorList,
+    ExistingEffectMap* existingEffects)
+{
+    RoutingGraph& graph = pedalboard.GetRoutingGraph();
+
+    // Validate before building — fail clearly rather than silently misbehave.
+    auto validation = graph.Validate();
+    if (!validation.IsValid())
+    {
+        for (const auto& err : validation.errors)
+            Lv2Log::error(SS("Routing graph error: " << err.message));
+        // Fall through with what we have — OutputBoxes that aren't reachable
+        // will simply produce silence.
+    }
+
+    // Topological sort gives us execution order: all upstreams before downstreams.
+    auto sorted = graph.TopologicalSort();
+    if (sorted.empty() && !graph.GetAllBoxes().empty())
+    {
+        Lv2Log::error("Routing graph contains a cycle — cannot prepare DSP path.");
+        return;
+    }
+
+    // Map from BoxId → output buffers produced by that box.
+    BoxBufferMap boxOutputs;
+
+    int nChannels = pHost->GetNumberOfInputAudioChannels();
+
+    for (Box* box : sorted)
+    {
+        if (box->isOutput())
+        {
+            // Collect all upstream output buffers feeding this OutputBox.
+            auto upstream = graph.GetUpstream(box->id);
+            std::vector<std::vector<float*>> incomingSets;
+            for (Box* up : upstream)
+            {
+                auto it = boxOutputs.find(up->id);
+                if (it != boxOutputs.end())
+                    incomingSets.push_back(it->second);
+            }
+
+            if (incomingSets.empty())
+            {
+                // Dead branch — OutputBox receives nothing, produce silence.
+                Lv2Log::warning(SS("OutputBox channel " << box->outputChannelIndex << " has no incoming signal."));
+                continue;
+            }
+
+            std::vector<float*> mixed = SumInputBuffers(incomingSets, nChannels);
+
+            // Map to physical output channel.
+            int ch = box->outputChannelIndex;
+            while ((int)this->pedalboardOutputBuffers.size() <= ch)
+                this->pedalboardOutputBuffers.push_back(nullptr);
+            this->pedalboardOutputBuffers[ch] = mixed[0]; // L or mono
+            if (ch + 1 < (int)this->pedalboardOutputBuffers.size() && mixed.size() >= 2)
+                this->pedalboardOutputBuffers[ch + 1] = mixed[1]; // R
+
+            // Store as "output" of this box too (so downstream can find it if needed).
+            boxOutputs[box->id] = mixed;
+            continue;
+        }
+
+        // Collect all upstream output buffers for this box.
+        auto upstream = graph.GetUpstream(box->id);
+        std::vector<std::vector<float*>> incomingSets;
+        for (Box* up : upstream)
+        {
+            auto it = boxOutputs.find(up->id);
+            if (it != boxOutputs.end())
+                incomingSets.push_back(it->second);
+        }
+
+        // Root boxes (no upstream) receive the pedalboard input buffers.
+        std::vector<float*> inputBufs;
+        if (incomingSets.empty())
+        {
+            inputBufs = this->pedalboardInputBuffers;
+        }
+        else
+        {
+            inputBufs = SumInputBuffers(incomingSets, nChannels);
+        }
+
+        // Find the corresponding PedalboardItem (needed for LV2 plugin creation).
+        const PedalboardItem* item = pedalboard.GetItem(box->id);
+
+        // Create and wire the effect.
+        auto pEffect = PreparePluginBox(*box, item, inputBufs, errorList, existingEffects);
+        if (!pEffect)
+        {
+            // Effect failed to load — pass input buffers straight through.
+            boxOutputs[box->id] = inputBufs;
+            continue;
+        }
+
+        auto outputBufs = WireEffect(pEffect, item, inputBufs);
+        boxOutputs[box->id] = outputBufs;
+    }
+
+    // Ensure pedalboardOutputBuffers has at least one valid entry.
+    // If no OutputBox was connected, fall back to the last box's output.
+    if (this->pedalboardOutputBuffers.empty() || this->pedalboardOutputBuffers[0] == nullptr)
+    {
+        Lv2Log::warning("No OutputBox produced audio — routing graph may be incomplete.");
+        // Find any box with output buffers as a last resort.
+        // unordered_map has no rbegin — find any non-empty output as fallback.
+        for (auto& kv : boxOutputs)
+        {
+            if (!kv.second.empty())
+            {
+                this->pedalboardOutputBuffers.clear();
+                this->pedalboardOutputBuffers.push_back(kv.second[0]);
+                if (kv.second.size() >= 2)
+                    this->pedalboardOutputBuffers.push_back(kv.second[1]);
+                break;
+            }
+        }
+    }
 }
 
 void Lv2Pedalboard::PrepareMidiMap(const PedalboardItem &pedalboardItem)
