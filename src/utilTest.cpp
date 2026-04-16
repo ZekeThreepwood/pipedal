@@ -21,7 +21,7 @@
  *   SOFTWARE.
  */
 #include "util.hpp"
-#include "catch.hpp"
+#include <catch/catch.hpp>
 
 using namespace pipedal;
 

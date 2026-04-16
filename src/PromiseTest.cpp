@@ -18,7 +18,7 @@
 // CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 #include "Promise.hpp"
-#include "catch.hpp"
+#include <catch/catch.hpp>
 #include <future>
 #include <thread>
 #include <iostream>

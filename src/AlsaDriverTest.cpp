@@ -23,7 +23,7 @@
  */
 
 #include "pch.h"
-#include "catch.hpp"
+#include <catch/catch.hpp>
 #include <cmath>
 #include <mutex>
 #include <iostream>

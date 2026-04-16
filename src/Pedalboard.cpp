@@ -385,14 +385,18 @@ bool PedalboardItem::IsStructurallyIdentical(const PedalboardItem&other) const
                 return false;
             }
         }
+        // FIX: previously the braces were inverted — the size-mismatch guard
+        // contained the item loop, so equal-size chains were never compared and
+        // different-size chains were iterated (potentially out-of-bounds).
         if (bottomChain().size() != other.bottomChain().size())
         {
-            for (size_t i = 0; i < bottomChain().size(); ++i)
+            return false;
+        }
+        for (size_t i = 0; i < bottomChain().size(); ++i)
+        {
+            if (!bottomChain()[i].IsStructurallyIdentical(other.bottomChain()[i]))
             {
-                if (!bottomChain()[i].IsStructurallyIdentical(other.bottomChain()[i]))
-                {
-                    return false;
-                }
+                return false;
             }
         }
     }

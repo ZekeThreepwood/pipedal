@@ -22,7 +22,7 @@
  * SOFTWARE.
  */
 
-#include "catch.hpp"
+#include <catch/catch.hpp>
 #include "UnixSocket.hpp"
 #include "ss.hpp"
 #include <unistd.h>

@@ -22,7 +22,7 @@
  * SOFTWARE.
  */
 
-#include "catch.hpp"
+#include <catch/catch.hpp>
 #include "AvahiService.hpp"
 #include "ss.hpp"
 #include <unistd.h>

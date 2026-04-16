@@ -413,6 +413,8 @@ add_executable(AuxInTest
 add_executable(pipedaltest
     testMain.cpp
 
+    PedalboardStructureTest.cpp
+
     ModGuiTest.cpp
     PipewireInputStreamTest.cpp
 
