@@ -17,7 +17,7 @@
 // IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 // CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-import { SyntheticEvent } from 'react';
+import React, { SyntheticEvent } from 'react';
 import ArrowRightIcon from '@mui/icons-material/ArrowRight';
 import IconButtonEx from './IconButtonEx';
 import { PiPedalModel, PiPedalModelFactory, PresetIndex } from './PiPedalModel';
@@ -38,12 +38,17 @@ import SavePresetAsDialog from './SavePresetAsDialog';
 import ImportPresetFromBankDialog from './ImportPresetFromBankDialog';
 
 import Select from '@mui/material/Select';
+import List from '@mui/material/List';
+import ListItemButton from '@mui/material/ListItemButton';
+import ListItemText from '@mui/material/ListItemText';
+import Typography from '@mui/material/Typography';
 import UploadPresetDialog from './UploadPresetDialog';
 import { isDarkMode } from './DarkMode';
 import ResizeResponsiveComponent from './ResizeResponsiveComponent';
 
 interface PresetSelectorProps extends WithStyles<typeof styles> {
-
+    drawerMode?: boolean;
+    onActionComplete?: () => void;
 }
 
 
@@ -338,14 +343,136 @@ const PresetSelector =
                 let value = event.currentTarget.getAttribute("data-value");
                 if (value && value.length > 0) {
                     this.model.loadPreset(parseInt(value));
+                    this.props.onActionComplete?.();
                 }
                 //this.model.loadPreset(event.target.value as number);
+            }
+
+            getSelectedPresetLabel(): string {
+                const presets = this.state.presets;
+                const item = presets.getItem(presets.selectedInstanceId);
+                if (!item) return "No preset selected";
+                return (presets.presetChanged && item.instanceId === presets.selectedInstanceId)
+                    ? `${item.name}*`
+                    : item.name;
+            }
+
+            renderDrawerLayout(presets: PresetIndex): React.ReactNode {
+                const classes = withStyles.getClasses(this.props);
+
+                return (
+                    <div
+                        style={{ paddingTop: 4, paddingBottom: 8 }}
+                        onClick={(e) => e.stopPropagation()}
+                        onKeyDown={(e) => e.stopPropagation()}
+                    >
+                        <div style={{ padding: "0 16px 8px 16px" }}>
+                            <Typography variant="caption" style={{ opacity: 0.75, display: "block", marginBottom: 6 }}>
+                                Presets
+                            </Typography>
+                            <Select
+                                variant="standard"
+                                className={classes.select}
+                                style={{ width: "100%", color: "inherit" }}
+                                disabled={!this.state.enabled}
+                                onChange={(e, extra) => this.handleChange(e, extra)}
+                                onClose={(e) => this.handleSelectClose(e)}
+                                displayEmpty
+                                value={presets.selectedInstanceId === 0 ? '' : presets.selectedInstanceId}
+                                inputProps={{
+                                    classes: { icon: classes.icon },
+                                    'aria-label': "Select preset"
+                                }}
+                            >
+                                {presets.presets.map((preset) => (
+                                    <MenuItem key={preset.instanceId} value={preset.instanceId}>
+                                        {(presets.presetChanged && preset.instanceId === presets.selectedInstanceId)
+                                            ? `${preset.name}*`
+                                            : preset.name}
+                                    </MenuItem>
+                                ))}
+                            </Select>
+                        </div>
+
+                        <List dense disablePadding>
+                            <ListItemButton onClick={(e) => { e.stopPropagation(); this.handlePresetsMenuSave(e); this.props.onActionComplete?.(); }}>
+                                <ListItemText primary="Save preset" secondary={this.getSelectedPresetLabel()} />
+                            </ListItemButton>
+                            <ListItemButton onClick={(e) => { e.stopPropagation(); this.handlePresetsMenuSaveAs(e); this.props.onActionComplete?.(); }}>
+                                <ListItemText primary="Save preset as..." />
+                            </ListItemButton>
+                            <ListItemButton onClick={(e) => { e.stopPropagation(); this.handlePresetsMenuRename(e); this.props.onActionComplete?.(); }}>
+                                <ListItemText primary="Rename..." />
+                            </ListItemButton>
+                            <ListItemButton onClick={(e) => { e.stopPropagation(); this.handlePresetsMenuImport(e); this.props.onActionComplete?.(); }}>
+                                <ListItemText primary="Import from bank..." />
+                            </ListItemButton>
+                            <ListItemButton onClick={(e) => { e.stopPropagation(); this.handlePresetsMenuNew(e); this.props.onActionComplete?.(); }}>
+                                <ListItemText primary="New..." />
+                            </ListItemButton>
+                            <Divider />
+                            <ListItemButton onClick={(e) => { e.stopPropagation(); this.handleDownloadPreset(e); this.props.onActionComplete?.(); }}>
+                                <ListItemText primary="Download preset" />
+                            </ListItemButton>
+                            <ListItemButton onClick={(e) => { e.stopPropagation(); this.handleUploadPreset(e); this.props.onActionComplete?.(); }}>
+                                <ListItemText primary="Upload preset" />
+                            </ListItemButton>
+                            <Divider />
+                            <ListItemButton onClick={(e) => { e.stopPropagation(); this.handleMenuEditPresets(); this.props.onActionComplete?.(); }}>
+                                <ListItemText primary="Manage presets..." />
+                            </ListItemButton>
+                        </List>
+                    </div>
+                );
             }
 
             render() {
                 //const classes = withStyles.getClasses(this.props);
                 let presets = this.state.presets;
                 const classes = withStyles.getClasses(this.props);
+
+                if (this.props.drawerMode) {
+                    return (
+                        <>
+                            {this.renderDrawerLayout(presets)}
+
+                            {this.state.showPresetsDialog&& (
+                                <PresetDialog show={this.state.showPresetsDialog} onDialogClose={() => this.handleDialogClose()}
+                                />
+                            )}
+                            {this.state.saveAsDialogOpen && (
+                                <SavePresetAsDialog open={this.state.saveAsDialogOpen}
+                                    defaultName={presets.getItem(presets.selectedInstanceId)?.name ?? "My Preset"}
+                                    onClose={() => { this.setState({ saveAsDialogOpen: false }) }}
+                                    onOk={(bankInstanceId, name) => {
+                                        this.handleSaveAsDialogOk(bankInstanceId, name);
+                                    }} />
+                            )}
+                            {this.state.importDialogOpen && (
+                                <ImportPresetFromBankDialog open={this.state.importDialogOpen}
+                                    onClose={() => { this.setState({ importDialogOpen: false }) }}
+                                    onOk={(bankInstanceId, presets) => {
+                                        this.handleImportDialogOk(bankInstanceId, presets);
+                                    }} />
+                            )}
+                            <RenameDialog open={this.state.renameDialogOpen}
+                                title={this.state.renameDialogTitle}
+                                defaultName={this.state.renameDialogDefaultName}
+                                acceptActionName={this.state.renameDialogActionName}
+                                onClose={() => this.handleRenameDialogClose()}
+                                onOk={(name: string) => this.handleRenameDialogOk(name)} />
+                            <UploadPresetDialog
+                                title='Upload preset'
+                                extension='.piPreset'
+                                uploadPage='uploadPreset'
+                                onUploaded={(instanceId) => { this.model.loadPreset(instanceId); }}
+                                open={this.state.openUploadPresetDialog}
+                                uploadAfter={-1}
+                                onClose={() => { this.setState({ openUploadPresetDialog: false }) }} />
+                        </>
+                    );
+                }
+
                 return (
                     <div style={{
                         marginLeft: 12, display: "flex", flexDirection: "row",

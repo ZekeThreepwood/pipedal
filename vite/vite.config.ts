@@ -2,7 +2,6 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import svgr from "vite-plugin-svgr"
 
-// https://vite.dev/config/
 export default defineConfig({
   build: {
     chunkSizeWarningLimit: 2000
@@ -11,9 +10,18 @@ export default defineConfig({
   server: {
     proxy: {
       '/resources': {
-        target: 'http://localhost:8080',
+        target: 'http://192.168.1.33',
+        changeOrigin: false,
+      },
+      '/var': {
+        target: 'http://192.168.1.33',
+        changeOrigin: false,
+      },
+      '/pipedal': {
+        target: 'ws://192.168.1.33',
+        ws: true,
         changeOrigin: false,
       },
     }
-}
+  }
 })
