@@ -539,6 +539,7 @@ export enum PluginType {
 
 
     // routing terminal box types (not real LV2 plugins)
+    RoutingBox = "RoutingBox",
     InputBox = "InputBox",
     OutputBox = "OutputBox",
 

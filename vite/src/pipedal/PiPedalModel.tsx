@@ -1225,9 +1225,25 @@ export class PiPedalModel //implements PiPedalModel
                     await this.getWebSocket().request<Pedalboard>("currentPedalboard")
                 )
             );
-            this.plugin_classes.set(new PluginClass().deserialize(
+            const rootClass = new PluginClass().deserialize(
                 await this.getWebSocket().request<any>("pluginClasses")
-            ));
+            );
+            // Inject synthetic "Routing" category for Input/Output boxes
+            const routingClass = new PluginClass();
+            routingClass.uri = "uri://two-play/pipedal/pedalboard#RoutingBox";
+            routingClass.display_name = "Routing";
+            routingClass.plugin_type = PluginType.RoutingBox;
+            const inputClass = new PluginClass();
+            inputClass.uri = "uri://two-play/pipedal/pedalboard#InputBox";
+            inputClass.display_name = "Input";
+            inputClass.plugin_type = PluginType.InputBox;
+            const outputClass = new PluginClass();
+            outputClass.uri = "uri://two-play/pipedal/pedalboard#OutputBox";
+            outputClass.display_name = "Output";
+            outputClass.plugin_type = PluginType.OutputBox;
+            routingClass.children = [inputClass, outputClass];
+            rootClass.children = [...rootClass.children, routingClass];
+            this.plugin_classes.set(rootClass);
             this.validatePluginClasses(this.plugin_classes.get());
 
             this.presets.set(
