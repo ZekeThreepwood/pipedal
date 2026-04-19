@@ -53,6 +53,7 @@
 #include <optional>
 #include <cmath>
 #include <stdexcept>
+#include "json.hpp"
 
 namespace pipedal {
 
@@ -79,7 +80,7 @@ enum class BoxType
 // ControlValue (mirrored from Pedalboard.hpp for independence)
 // ---------------------------------------------------------------------------
 
-struct RgControlValue
+struct RgControlValue : public JsonSerializable
 {
     std::string key;
     float       value = 0.0f;
@@ -87,13 +88,16 @@ struct RgControlValue
     RgControlValue() = default;
     RgControlValue(const char* k, float v) : key(k), value(v) {}
     RgControlValue(std::string k, float v) : key(std::move(k)), value(v) {}
+
+    void write_json(json_writer& writer) const override;
+    void read_json(json_reader& reader) override;
 };
 
 // ---------------------------------------------------------------------------
 // Box — base for every node in the routing graph.
 // ---------------------------------------------------------------------------
 
-class Box
+class Box : public JsonSerializable
 {
 public:
     BoxId       id   = INVALID_BOX_ID;
@@ -123,6 +127,9 @@ public:
 
     Box() = default;
     virtual ~Box() = default;
+
+    void write_json(json_writer& writer) const override;
+    void read_json(json_reader& reader) override;
 
     bool isPlugin() const { return type == BoxType::Plugin; }
     bool isMerge()  const { return type == BoxType::Merge;  }
@@ -154,7 +161,7 @@ public:
 // Connection — a directed edge from one Box output to one Box input.
 // ---------------------------------------------------------------------------
 
-struct Connection
+struct Connection : public JsonSerializable
 {
     BoxId from = INVALID_BOX_ID;  // upstream Box
     BoxId to   = INVALID_BOX_ID;  // downstream Box
@@ -166,6 +173,9 @@ struct Connection
     {
         return from == o.from && to == o.to;
     }
+
+    void write_json(json_writer& writer) const override;
+    void read_json(json_reader& reader) override;
 };
 
 // ---------------------------------------------------------------------------
@@ -175,7 +185,7 @@ struct Connection
 // Connections are stored as a flat list of directed edges.
 // ---------------------------------------------------------------------------
 
-class RoutingGraph
+class RoutingGraph : public JsonSerializable
 {
 public:
     // US-02: stable identity counter — never reuses IDs within a graph.
@@ -656,6 +666,9 @@ public:
 
         return result;
     }
+
+    void write_json(json_writer& writer) const override;
+    void read_json(json_reader& reader) override;
 
 private:
     void WalkDownstreamImpl(BoxId id,

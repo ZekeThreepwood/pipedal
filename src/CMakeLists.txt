@@ -272,6 +272,7 @@ set (PIPEDAL_SOURCES
     PiPedalVersion.hpp PiPedalVersion.cpp
     PiPedalModel.hpp PiPedalModel.cpp 
     Pedalboard.hpp Pedalboard.cpp
+    RoutingGraph.hpp RoutingGraph.cpp
     Presets.hpp Presets.cpp
     Storage.hpp Storage.cpp
     Banks.hpp Banks.cpp

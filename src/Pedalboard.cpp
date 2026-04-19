@@ -289,6 +289,14 @@ void Pedalboard::BuildRoutingGraphFromItems(
 
 void Pedalboard::RebuildRoutingGraph()
 {
+    // US-06: If the graph was loaded from JSON it already has boxes — use it
+    // directly instead of rebuilding from items_.
+    if (!routingGraph_.boxes_.empty())
+    {
+        routingGraphDirty_ = false;
+        return;
+    }
+
     routingGraph_ = RoutingGraph();
     routingGraph_.name = name_;
 
@@ -618,6 +626,7 @@ JSON_MAP_BEGIN(Pedalboard)
     JSON_MAP_REFERENCE(Pedalboard,snapshots)
     JSON_MAP_REFERENCE(Pedalboard,selectedSnapshot)
     JSON_MAP_REFERENCE(Pedalboard,selectedPlugin)
+    JSON_MAP_REFERENCE(Pedalboard,routingGraph)
 JSON_MAP_END()
 
 JSON_MAP_BEGIN(SnapshotValue)
