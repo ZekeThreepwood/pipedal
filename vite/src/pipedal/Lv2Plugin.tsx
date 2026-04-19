@@ -1278,32 +1278,62 @@ export function makeSplitUiPlugin(): UiPlugin {
     );
 }
 
-export const INPUT_BOX_URI  = "uri://two-play/pipedal/pedalboard#Input";
-export const OUTPUT_BOX_URI = "uri://two-play/pipedal/pedalboard#Output";
+export const INPUT_BOX_URI        = "uri://two-play/pipedal/pedalboard#Input";
+export const INPUT_BOX_MONO_URI   = "uri://two-play/pipedal/pedalboard#InputMono";
+export const INPUT_BOX_STEREO_URI = "uri://two-play/pipedal/pedalboard#InputStereo";
+export const OUTPUT_BOX_URI        = "uri://two-play/pipedal/pedalboard#Output";
+export const OUTPUT_BOX_MONO_URI   = "uri://two-play/pipedal/pedalboard#OutputMono";
+export const OUTPUT_BOX_STEREO_URI = "uri://two-play/pipedal/pedalboard#OutputStereo";
 
-const channelsControl = new UiControl().applyProperties({
-    symbol: "channels",
-    name: "Channels",
-    index: 0,
-    is_input: true,
-    min_value: 1.0,
-    max_value: 2.0,
-    default_value: 1.0,
-    enumeration_property: true,
-    scale_points: [
-        new ScalePoint().deserialize({ value: 1, label: "Mono" }),
-        new ScalePoint().deserialize({ value: 2, label: "Stereo" }),
-    ],
-    is_bypass: false,
-    is_program_controller: false,
-    custom_units: "",
-    connection_optional: false,
-});
+function makeStereoChannelsControl(): UiControl {
+    return new UiControl().applyProperties({
+        symbol: "channels",
+        name: "Channels",
+        index: 0,
+        is_input: true,
+        min_value: 1.0,
+        max_value: 2.0,
+        default_value: 2.0,
+        enumeration_property: true,
+        scale_points: [
+            new ScalePoint().deserialize({ value: 1, label: "Mono" }),
+            new ScalePoint().deserialize({ value: 2, label: "Stereo" }),
+        ],
+        is_bypass: false,
+        is_program_controller: false,
+        custom_units: "",
+        connection_optional: false,
+    });
+}
 
-export function makeInputUiPlugin(): UiPlugin {
+export function makeInputMonoUiPlugin(): UiPlugin {
     return new UiPlugin().deserialize({
-        uri: INPUT_BOX_URI,
-        name: "Input",
+        uri: INPUT_BOX_MONO_URI,
+        name: "Input (Mono)",
+        brand: "",
+        label: "IN",
+        plugin_type: PluginType.InputBox,
+        plugin_display_type: "InputBox",
+        author_name: "",
+        author_homepage: "",
+        audio_inputs: 0,
+        audio_side_chain_inputs: 0,
+        audio_outputs: 1,
+        has_midi_input: 0,
+        has_midi_output: 0,
+        description: "Mono hardware audio input",
+        controls: [],
+        port_groups: [],
+        fileProperties: [],
+        frequencyPlots: [],
+        is_vst3: false,
+    });
+}
+
+export function makeInputStereoUiPlugin(): UiPlugin {
+    return new UiPlugin().deserialize({
+        uri: INPUT_BOX_STEREO_URI,
+        name: "Input (Stereo)",
         brand: "",
         label: "IN",
         plugin_type: PluginType.InputBox,
@@ -1315,8 +1345,8 @@ export function makeInputUiPlugin(): UiPlugin {
         audio_outputs: 2,
         has_midi_input: 0,
         has_midi_output: 0,
-        description: "Hardware audio input",
-        controls: [channelsControl],
+        description: "Stereo hardware audio input",
+        controls: [makeStereoChannelsControl()],
         port_groups: [],
         fileProperties: [],
         frequencyPlots: [],
@@ -1324,10 +1354,34 @@ export function makeInputUiPlugin(): UiPlugin {
     });
 }
 
-export function makeOutputUiPlugin(): UiPlugin {
+export function makeOutputMonoUiPlugin(): UiPlugin {
     return new UiPlugin().deserialize({
-        uri: OUTPUT_BOX_URI,
-        name: "Output",
+        uri: OUTPUT_BOX_MONO_URI,
+        name: "Output (Mono)",
+        brand: "",
+        label: "OUT",
+        plugin_type: PluginType.OutputBox,
+        plugin_display_type: "OutputBox",
+        author_name: "",
+        author_homepage: "",
+        audio_inputs: 1,
+        audio_side_chain_inputs: 0,
+        audio_outputs: 0,
+        has_midi_input: 0,
+        has_midi_output: 0,
+        description: "Mono hardware audio output",
+        controls: [],
+        port_groups: [],
+        fileProperties: [],
+        frequencyPlots: [],
+        is_vst3: false,
+    });
+}
+
+export function makeOutputStereoUiPlugin(): UiPlugin {
+    return new UiPlugin().deserialize({
+        uri: OUTPUT_BOX_STEREO_URI,
+        name: "Output (Stereo)",
         brand: "",
         label: "OUT",
         plugin_type: PluginType.OutputBox,
@@ -1339,11 +1393,16 @@ export function makeOutputUiPlugin(): UiPlugin {
         audio_outputs: 0,
         has_midi_input: 0,
         has_midi_output: 0,
-        description: "Hardware audio output",
-        controls: [channelsControl],
+        description: "Stereo hardware audio output",
+        controls: [makeStereoChannelsControl()],
         port_groups: [],
         fileProperties: [],
         frequencyPlots: [],
         is_vst3: false,
     });
 }
+
+/** @deprecated use the Mono/Stereo variants directly */
+export function makeInputUiPlugin(): UiPlugin { return makeInputStereoUiPlugin(); }
+/** @deprecated use the Mono/Stereo variants directly */
+export function makeOutputUiPlugin(): UiPlugin { return makeOutputStereoUiPlugin(); }

@@ -17,7 +17,9 @@
 // IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 // CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-import { UiPlugin, UiControl, PluginType, UiFileProperty, makeInputUiPlugin, makeOutputUiPlugin } from './Lv2Plugin';
+import { UiPlugin, UiControl, PluginType, UiFileProperty,
+    makeInputMonoUiPlugin, makeInputStereoUiPlugin,
+    makeOutputMonoUiPlugin, makeOutputStereoUiPlugin } from './Lv2Plugin';
 
 import { PiPedalArgumentError, PiPedalStateError } from './PiPedalError';
 import { UpdateStatus, UpdatePolicyT } from './Updater';
@@ -1206,9 +1208,13 @@ export class PiPedalModel //implements PiPedalModel
             this.hasWifiDevice.set(await this.getWebSocket().request<boolean>("getHasWifi"));
 
             const serverPlugins = UiPlugin.deserialize_array(await this.getWebSocket().request<any>("plugins"));
-            const inputPlugin  = makeInputUiPlugin();
-            const outputPlugin = makeOutputUiPlugin();
-            this.ui_plugins.set([inputPlugin, outputPlugin, ...serverPlugins]);
+            this.ui_plugins.set([
+                makeInputMonoUiPlugin(),
+                makeInputStereoUiPlugin(),
+                makeOutputMonoUiPlugin(),
+                makeOutputStereoUiPlugin(),
+                ...serverPlugins,
+            ]);
             // index ui plugins.
             this.uiPluginsByUri = new Map<string, UiPlugin>();
             for (let i of this.ui_plugins.get()) {
