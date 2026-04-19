@@ -26,7 +26,7 @@ import { withStyles } from "tss-react/mui";
 
 import { Theme } from "@mui/material/styles";
 import { PiPedalModel, PiPedalModelFactory } from "./PiPedalModel";
-import { PluginType } from "./Lv2Plugin";
+import { PluginType, INPUT_BOX_MONO_URI, INPUT_BOX_STEREO_URI, OUTPUT_BOX_MONO_URI, OUTPUT_BOX_STEREO_URI } from "./Lv2Plugin";
 import ButtonBase from "@mui/material/ButtonBase";
 import Typography from "@mui/material/Typography";
 import PluginIcon, { getIconColor, SelectIconUri } from "./PluginIcon";
@@ -367,6 +367,12 @@ class PedalLayout {
   }
   isEnd() {
     return this.uri === END_PEDALBOARD_ITEM_URI;
+  }
+  isInputBox() {
+    return this.pluginType === PluginType.InputBox;
+  }
+  isOutputBox() {
+    return this.pluginType === PluginType.OutputBox;
   }
 }
 
@@ -1394,7 +1400,7 @@ const PedalboardView = withTheme(
               enabled && splitter.isBSelected(),
               false,
             );
-          } else if (item.uri !== END_PEDALBOARD_ITEM_URI) {
+          } else if (item.uri !== END_PEDALBOARD_ITEM_URI && !item.isOutputBox()) {
             this.renderConnector(output, item, enabled);
           }
         }
@@ -1495,7 +1501,32 @@ const PedalboardView = withTheme(
               );
               break;
             default:
-              if (item.isSplitter()) {
+              if (item.isInputBox() || item.isOutputBox()) {
+                result.push(
+                  <div
+                    key={this.renderKey++}
+                    className={classes.splitItem}
+                    style={{
+                      left: item.bounds.x,
+                      top: item.bounds.y,
+                      width: item.bounds.width,
+                    }}
+                  >
+                    <div className={classes.splitStart}>
+                      {this.pedalButton(
+                        item.pedalItem?.instanceId ?? -1,
+                        item.pluginType,
+                        item.iconColor,
+                        false,
+                        true,
+                        false,
+                        false,
+                        false,
+                      )}
+                    </div>
+                  </div>,
+                );
+              } else if (item.isSplitter()) {
                 result.push(
                   <div
                     key={this.renderKey++}
@@ -1662,6 +1693,11 @@ const PedalboardView = withTheme(
               numberOfOutputs,
             );
             return item.numberOfOutputs;
+          } else if (item.isOutputBox()) {
+            // OutputBox is a sink — nothing propagates backward past it
+          } else if (item.isInputBox()) {
+            item.numberOfOutputs = CalculateConnection(item.numberOfOutputs, numberOfOutputs);
+            return item.numberOfOutputs;
           } else if (item.isEmpty()) {
             if (numberOfOutputs === 0) {
               item.numberOfOutputs = 0;
@@ -1738,6 +1774,13 @@ const PedalboardView = withTheme(
               numberOfInputs,
             );
             return item.numberOfInputs;
+          } else if (item.isInputBox()) {
+            // Fixed hardware source — channel count declared by the plugin, not from upstream
+            item.numberOfOutputs = Math.min(item.originalOutputs, 2);
+          } else if (item.isOutputBox()) {
+            // Hardware sink — accept whatever channels flow in
+            item.numberOfInputs = CalculateConnection(item.originalInputs, numberOfInputs);
+            return item.numberOfInputs;
           } else if (item.isEmpty()) {
             item.numberOfInputs = numberOfInputs;
             if (numberOfInputs === 0) {
@@ -1777,8 +1820,12 @@ const PedalboardView = withTheme(
         let start = PedalLayout.Start();
         let end = PedalLayout.End();
         if (layoutChain.length !== 0) {
-          layoutChain.splice(0, 0, start);
-          layoutChain.splice(layoutChain.length, 0, end);
+          const firstUri = layoutChain[0].uri;
+          const lastUri = layoutChain[layoutChain.length - 1].uri;
+          const hasInputBox = firstUri === INPUT_BOX_MONO_URI || firstUri === INPUT_BOX_STEREO_URI;
+          const hasOutputBox = lastUri === OUTPUT_BOX_MONO_URI || lastUri === OUTPUT_BOX_STEREO_URI;
+          if (!hasInputBox) layoutChain.splice(0, 0, start);
+          if (!hasOutputBox) layoutChain.splice(layoutChain.length, 0, end);
           this.markStereoOutputs(layoutChain, 2, 2);
         }
 
