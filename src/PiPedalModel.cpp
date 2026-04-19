@@ -507,6 +507,17 @@ void PiPedalModel::SetControl(int64_t clientId, int64_t pedalItemId, const std::
             this->FirePedalboardChanged(clientId);
             return;
         }
+        // InputBox/OutputBox "channels" control changes routing topology — full rebuild.
+        if (item != nullptr && symbol == "channels")
+        {
+            const std::string &uri = item->uri();
+            if (uri == INPUT_PEDALBOARD_ITEM_URI_MONO || uri == INPUT_PEDALBOARD_ITEM_URI_STEREO ||
+                uri == OUTPUT_PEDALBOARD_ITEM_URI)
+            {
+                this->FirePedalboardChanged(clientId);
+                return;
+            }
+        }
         PreviewControl(clientId, pedalItemId, symbol, value);
 
         {
