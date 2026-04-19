@@ -648,15 +648,19 @@ void Lv2Pedalboard::PrepareFromRoutingGraph(
                 continue;
             }
 
-            std::vector<float*> mixed = SumInputBuffers(incomingSets, nChannels);
+            // "channels" control: 1=mono, 2=stereo. Default mono.
+            const auto* chCv = box->GetControlValue("channels");
+            int outChans = (chCv && chCv->value >= 2.0f) ? 2 : 1;
 
-            // Map to physical output channel.
+            std::vector<float*> mixed = SumInputBuffers(incomingSets, outChans);
+
+            // Map to physical output channel(s).
             int ch = box->outputChannelIndex;
-            while ((int)this->pedalboardOutputBuffers.size() <= ch)
+            while ((int)this->pedalboardOutputBuffers.size() <= ch + outChans - 1)
                 this->pedalboardOutputBuffers.push_back(nullptr);
-            this->pedalboardOutputBuffers[ch] = mixed[0]; // L or mono
-            if (ch + 1 < (int)this->pedalboardOutputBuffers.size() && mixed.size() >= 2)
-                this->pedalboardOutputBuffers[ch + 1] = mixed[1]; // R
+            this->pedalboardOutputBuffers[ch] = mixed[0];
+            if (outChans >= 2 && mixed.size() >= 2)
+                this->pedalboardOutputBuffers[ch + 1] = mixed[1];
 
             // Store as "output" of this box too (so downstream can find it if needed).
             boxOutputs[box->id] = mixed;

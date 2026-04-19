@@ -273,6 +273,10 @@ export function SelectSvgIcon(plugin_type: PluginType, className: string, size: 
         case PluginType.SplitLR:
             return <SplitLrIcon className={className} style={myStyle} />;
 
+        case PluginType.InputBox:
+            return <FxTerminalIcon className={className} style={myStyle} />;
+        case PluginType.OutputBox:
+            return <FxTerminalIcon className={className} style={myStyle} />;
         case PluginType.None:
             return <FxEmptyIcon className={className} style={myStyle} />;
         case PluginType.Terminal:

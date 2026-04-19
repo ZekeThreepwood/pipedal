@@ -33,6 +33,7 @@ namespace pipedal {
     
 #define SPLIT_PEDALBOARD_ITEM_URI  "uri://two-play/pipedal/pedalboard#Split"
 #define EMPTY_PEDALBOARD_ITEM_URI  "uri://two-play/pipedal/pedalboard#Empty"
+#define OUTPUT_PEDALBOARD_ITEM_URI "uri://two-play/pipedal/pedalboard#Output"
 
 #define SPLIT_SPLITTYPE_KEY "splitType"
 #define SPLIT_SELECT_KEY "select"

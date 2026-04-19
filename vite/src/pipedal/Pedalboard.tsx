@@ -305,6 +305,220 @@ export enum SplitType {
     Lr = 2
 }
 
+// ---------------------------------------------------------------------------
+// US-10: RoutingGraph model — mirrors RoutingGraph.hpp / RoutingGraph.cpp.
+// ---------------------------------------------------------------------------
+
+export const INVALID_BOX_ID = 0;
+export type BoxType = "Plugin" | "Merge" | "Ab" | "Output";
+
+export class Box {
+    id: number = INVALID_BOX_ID;
+    type: BoxType = "Plugin";
+    isEnabled: boolean = true;
+    title: string = "";
+    iconColor: string = "";
+    pluginUri: string = "";
+    pluginName: string = "";
+    controlValues: ControlValue[] = [];
+    outputChannelIndex: number = 0;
+    mergeVolume: number = 0;
+    mergePanL: number = 0;
+    mergePanR: number = 0;
+    abSelectedInput: number = 0;
+
+    deserialize(input: any): Box {
+        this.id                 = input.id                 ?? INVALID_BOX_ID;
+        this.type               = input.type               ?? "Plugin";
+        this.isEnabled          = input.isEnabled          ?? true;
+        this.title              = input.title              ?? "";
+        this.iconColor          = input.iconColor          ?? "";
+        this.pluginUri          = input.pluginUri          ?? "";
+        this.pluginName         = input.pluginName         ?? "";
+        this.controlValues      = ControlValue.deserializeArray(input.controlValues ?? []);
+        this.outputChannelIndex = input.outputChannelIndex ?? 0;
+        this.mergeVolume        = input.mergeVolume        ?? 0;
+        this.mergePanL          = input.mergePanL          ?? 0;
+        this.mergePanR          = input.mergePanR          ?? 0;
+        this.abSelectedInput    = input.abSelectedInput    ?? 0;
+        return this;
+    }
+
+    static deserializeArray(input: any[]): Box[] {
+        return (input ?? []).map((x: any) => new Box().deserialize(x));
+    }
+
+    isPlugin():  boolean { return this.type === "Plugin"; }
+    isMerge():   boolean { return this.type === "Merge";  }
+    isAb():      boolean { return this.type === "Ab";     }
+    isOutput():  boolean { return this.type === "Output"; }
+    isEmpty():   boolean { return this.pluginUri === EMPTY_PEDALBOARD_ITEM_URI; }
+
+    getControlValue(key: string): number {
+        const cv = this.controlValues.find(c => c.key === key);
+        return cv ? cv.value : 0;
+    }
+    setControlValue(key: string, value: number): boolean {
+        const cv = this.controlValues.find(c => c.key === key);
+        if (cv) {
+            if (cv.value === value) return false;
+            cv.value = value;
+            return true;
+        }
+        this.controlValues.push(new ControlValue(key, value));
+        return true;
+    }
+}
+
+export class Connection {
+    from: number = INVALID_BOX_ID;
+    to:   number = INVALID_BOX_ID;
+
+    constructor(from?: number, to?: number) {
+        this.from = from ?? INVALID_BOX_ID;
+        this.to   = to   ?? INVALID_BOX_ID;
+    }
+    deserialize(input: any): Connection {
+        this.from = input.from ?? INVALID_BOX_ID;
+        this.to   = input.to   ?? INVALID_BOX_ID;
+        return this;
+    }
+    static deserializeArray(input: any[]): Connection[] {
+        return (input ?? []).map((x: any) => new Connection().deserialize(x));
+    }
+}
+
+export class RoutingGraph {
+    name:        string       = "";
+    nextBoxId:   number       = 1;
+    boxes:       Box[]        = [];
+    connections: Connection[] = [];
+
+    deserialize(input: any): RoutingGraph {
+        this.name        = input.name        ?? "";
+        this.nextBoxId   = input.nextBoxId   ?? 1;
+        this.boxes       = Box.deserializeArray(input.boxes ?? []);
+        this.connections = Connection.deserializeArray(input.connections ?? []);
+        return this;
+    }
+
+    isEmpty(): boolean { return this.boxes.length === 0; }
+
+    findBox(id: number): Box | null {
+        return this.boxes.find(b => b.id === id) ?? null;
+    }
+
+    getUpstream(id: number): Box[] {
+        return this.connections
+            .filter(c => c.to === id)
+            .map(c => this.findBox(c.from))
+            .filter((b): b is Box => b !== null);
+    }
+
+    getDownstream(id: number): Box[] {
+        return this.connections
+            .filter(c => c.from === id)
+            .map(c => this.findBox(c.to))
+            .filter((b): b is Box => b !== null);
+    }
+
+    getOutputBoxes():  Box[] { return this.boxes.filter(b => b.isOutput()); }
+    getPluginBoxes():  Box[] { return this.boxes.filter(b => b.isPlugin()); }
+    getRootBoxes():    Box[] {
+        const hasIncoming = new Set(this.connections.map(c => c.to));
+        return this.boxes.filter(b => !hasIncoming.has(b.id));
+    }
+
+    // Kahn's topological sort — returns boxes in signal-flow order.
+    // Returns [] if there is a cycle.
+    topologicalSort(): Box[] {
+        const inDegree = new Map<number, number>();
+        for (const b of this.boxes) inDegree.set(b.id, 0);
+        for (const c of this.connections) {
+            inDegree.set(c.to, (inDegree.get(c.to) ?? 0) + 1);
+        }
+        const queue: number[] = [];
+        for (const [id, deg] of inDegree) {
+            if (deg === 0) queue.push(id);
+        }
+        const sorted: Box[] = [];
+        let head = 0;
+        while (head < queue.length) {
+            const current = queue[head++];
+            const box = this.findBox(current);
+            if (box) sorted.push(box);
+            for (const c of this.connections) {
+                if (c.from === current) {
+                    const nd = (inDegree.get(c.to) ?? 1) - 1;
+                    inDegree.set(c.to, nd);
+                    if (nd === 0) queue.push(c.to);
+                }
+            }
+        }
+        return sorted.length === this.boxes.length ? sorted : [];
+    }
+
+    // Build a RoutingGraph from the legacy items[] tree — mirrors
+    // Pedalboard.cpp::RebuildRoutingGraph. Used as fallback for old preset
+    // files that have no "routingGraph" key.
+    static fromItems(items: PedalboardItem[], name: string): RoutingGraph {
+        const g = new RoutingGraph();
+        g.name = name;
+
+        const outputBox = new Box();
+        outputBox.id    = g.nextBoxId++;
+        outputBox.type  = "Output";
+        outputBox.title = "Output";
+        outputBox.outputChannelIndex = 0;
+        g.boxes.push(outputBox);
+        const outputId = outputBox.id;
+
+        g._buildFromItems(items, INVALID_BOX_ID);
+
+        for (const b of g.boxes) {
+            if (b.id === outputId) continue;
+            if (!g.connections.some(c => c.from === b.id)) {
+                g.connections.push(new Connection(b.id, outputId));
+            }
+        }
+        return g;
+    }
+
+    private _buildFromItems(items: PedalboardItem[], upstreamId: number): void {
+        for (const item of items) {
+            const box = new Box();
+            box.id        = item.instanceId;
+            box.isEnabled = item.isEnabled;
+            box.pluginUri  = item.uri;
+            box.pluginName = item.pluginName ?? "";
+            box.title      = item.title      ?? "";
+            box.iconColor  = item.iconColor  ?? "";
+            box.controlValues = item.controlValues.map(cv => new ControlValue(cv.key, cv.value));
+
+            if (item.isSplit()) {
+                box.type = item.getControlValue("splitType") === 0 ? "Ab" : "Merge";
+            } else {
+                box.type = "Plugin";
+            }
+
+            if (box.id >= this.nextBoxId) this.nextBoxId = box.id + 1;
+            this.boxes.push(box);
+
+            if (upstreamId !== INVALID_BOX_ID) {
+                this.connections.push(new Connection(upstreamId, box.id));
+            }
+
+            if (item.isSplit()) {
+                const split = item as PedalboardSplitItem;
+                this._buildFromItems(split.topChain,    box.id);
+                this._buildFromItems(split.bottomChain, box.id);
+            } else {
+                upstreamId = box.id;
+            }
+        }
+    }
+}
+
 
 
 export class PedalboardSplitItem extends PedalboardItem {
@@ -377,6 +591,11 @@ export class Pedalboard implements Deserializable<Pedalboard> {
         this.selectedSnapshot = input.selectedSnapshot;
         this.pathProperties = input.pathProperties;
         this.selectedPlugin = input.selectedPlugin??-1;
+        if (input.routingGraph && input.routingGraph.boxes && input.routingGraph.boxes.length > 0) {
+            this.routingGraph = new RoutingGraph().deserialize(input.routingGraph);
+        } else {
+            this.routingGraph = RoutingGraph.fromItems(this.items, this.name);
+        }
         return this;
     }
 
@@ -393,6 +612,13 @@ export class Pedalboard implements Deserializable<Pedalboard> {
     selectedSnapshot: number = -1;
     pathProperties: {[Name: string]: string} = {};
     selectedPlugin: number = -1;
+    routingGraph: RoutingGraph = new RoutingGraph();
+
+    // Exclude routingGraph from JSON serialization — server rebuilds it from items_.
+    toJSON(): object {
+        const { routingGraph: _rg, ...rest } = this as any;
+        return rest;
+    }
 
     // yields all items in the pedalboard, including split items. Splits are yielded before their children.
     *itemsGenerator(): Generator<PedalboardItem, void, undefined> {

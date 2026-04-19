@@ -538,9 +538,13 @@ export enum PluginType {
 
 
 
+    // routing terminal box types (not real LV2 plugins)
+    InputBox = "InputBox",
+    OutputBox = "OutputBox",
+
     // pseudo plugin type for misc icons.
     ErrorPlugin = "ErrorPlugin",
-    Terminal = "Terminal", //"img/fx_terminal.svg"; 
+    Terminal = "Terminal", //"img/fx_terminal.svg";
 
 }
 
@@ -1274,4 +1278,72 @@ export function makeSplitUiPlugin(): UiPlugin {
     );
 }
 
+export const INPUT_BOX_URI  = "uri://two-play/pipedal/pedalboard#Input";
+export const OUTPUT_BOX_URI = "uri://two-play/pipedal/pedalboard#Output";
 
+const channelsControl = new UiControl().applyProperties({
+    symbol: "channels",
+    name: "Channels",
+    index: 0,
+    is_input: true,
+    min_value: 1.0,
+    max_value: 2.0,
+    default_value: 1.0,
+    enumeration_property: true,
+    scale_points: [
+        new ScalePoint().deserialize({ value: 1, label: "Mono" }),
+        new ScalePoint().deserialize({ value: 2, label: "Stereo" }),
+    ],
+    is_bypass: false,
+    is_program_controller: false,
+    custom_units: "",
+    connection_optional: false,
+});
+
+export function makeInputUiPlugin(): UiPlugin {
+    return new UiPlugin().deserialize({
+        uri: INPUT_BOX_URI,
+        name: "Input",
+        brand: "",
+        label: "IN",
+        plugin_type: PluginType.InputBox,
+        plugin_display_type: "InputBox",
+        author_name: "",
+        author_homepage: "",
+        audio_inputs: 0,
+        audio_side_chain_inputs: 0,
+        audio_outputs: 2,
+        has_midi_input: 0,
+        has_midi_output: 0,
+        description: "Hardware audio input",
+        controls: [channelsControl],
+        port_groups: [],
+        fileProperties: [],
+        frequencyPlots: [],
+        is_vst3: false,
+    });
+}
+
+export function makeOutputUiPlugin(): UiPlugin {
+    return new UiPlugin().deserialize({
+        uri: OUTPUT_BOX_URI,
+        name: "Output",
+        brand: "",
+        label: "OUT",
+        plugin_type: PluginType.OutputBox,
+        plugin_display_type: "OutputBox",
+        author_name: "",
+        author_homepage: "",
+        audio_inputs: 2,
+        audio_side_chain_inputs: 0,
+        audio_outputs: 0,
+        has_midi_input: 0,
+        has_midi_output: 0,
+        description: "Hardware audio output",
+        controls: [channelsControl],
+        port_groups: [],
+        fileProperties: [],
+        frequencyPlots: [],
+        is_vst3: false,
+    });
+}

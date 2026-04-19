@@ -257,6 +257,10 @@ void Pedalboard::BuildRoutingGraphFromItems(
             float splitTypeVal = cv ? cv->value() : 0.0f;
             box->type = (splitTypeVal == 0.0f) ? BoxType::Ab : BoxType::Merge;
         }
+        else if (item.uri() == OUTPUT_PEDALBOARD_ITEM_URI)
+        {
+            box->type = BoxType::Output;
+        }
         else
         {
             box->type = BoxType::Plugin;
@@ -300,19 +304,38 @@ void Pedalboard::RebuildRoutingGraph()
     routingGraph_ = RoutingGraph();
     routingGraph_.name = name_;
 
-    auto outputBox = routingGraph_.MakeOutputBox(0);
-    outputBox->title = "Output";
-    routingGraph_.boxes_.push_back(outputBox);
-    BoxId outputId = outputBox->id;
+    // Check whether items_ contains any explicit #Output boxes.
+    std::function<bool(const std::vector<PedalboardItem>&)> hasOutputItem;
+    hasOutputItem = [&](const std::vector<PedalboardItem>& items) -> bool {
+        for (const auto& i : items) {
+            if (i.uri() == OUTPUT_PEDALBOARD_ITEM_URI) return true;
+            if (i.isSplit() &&
+                (hasOutputItem(i.topChain()) || hasOutputItem(i.bottomChain())))
+                return true;
+        }
+        return false;
+    };
+
+    BoxId outputId = INVALID_BOX_ID;
+    if (!hasOutputItem(items_))
+    {
+        auto outputBox = routingGraph_.MakeOutputBox(0);
+        outputBox->title = "Output";
+        routingGraph_.boxes_.push_back(outputBox);
+        outputId = outputBox->id;
+    }
 
     BuildRoutingGraphFromItems(items_, INVALID_BOX_ID);
 
-    for (const auto& b : routingGraph_.boxes_)
+    // Connect terminal plugin/merge/ab nodes to the implicit output (if one was created).
+    if (outputId != INVALID_BOX_ID)
     {
-        if (b->id == outputId) continue;
-        if (routingGraph_.OutgoingCount(b->id) == 0)
+        for (const auto& b : routingGraph_.boxes_)
         {
-            routingGraph_.Connect(b->id, outputId);
+            if (b->id == outputId) continue;
+            if (b->isOutput()) continue;
+            if (routingGraph_.OutgoingCount(b->id) == 0)
+                routingGraph_.Connect(b->id, outputId);
         }
     }
 
