@@ -150,8 +150,8 @@ namespace pipedal
             Lv2PedalboardErrorList& errorList,
             ExistingEffectMap* existingEffects);
 
-        // Phase B: flip to true to activate the new DSP path.
-        bool useRoutingGraphPath_ = false;
+        // Phase B: new DSP path is active.
+        bool useRoutingGraphPath_ = true;
 
 
     public:

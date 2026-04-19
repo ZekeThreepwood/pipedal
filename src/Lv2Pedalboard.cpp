@@ -387,34 +387,43 @@ void Lv2Pedalboard::Prepare(IHost *pHost, Pedalboard &pedalboard, Lv2PedalboardE
 
 // Sum N incoming buffer sets into a fresh set of mix buffers.
 // Applies -20*log10(N) dB gain compensation when N > 1.
+// Registers a runtime process action to do the actual summing each audio cycle.
 std::vector<float*> Lv2Pedalboard::SumInputBuffers(
     const std::vector<std::vector<float*>>& incomingSets,
     int nChannels)
 {
+    if (incomingSets.empty())
+        return AllocateAudioBuffers(nChannels); // silence
+
     if (incomingSets.size() == 1)
-        return incomingSets[0]; // no summing needed
+        return incomingSets[0]; // direct pass-through, no copy needed
 
     float gainLinear = std::pow(10.0f,
         RoutingGraph::ImplicitFanInCompensationDb((int)incomingSets.size()) / 20.0f);
 
     std::vector<float*> mixed = AllocateAudioBuffers(nChannels);
-    size_t bufSize = pHost->GetMaxAudioBufferSize();
 
-    for (int ch = 0; ch < nChannels; ++ch)
+    auto inCopy  = incomingSets;
+    auto outCopy = mixed;
+    int  nCh     = nChannels;
+    this->processActions.push_back([inCopy, outCopy, gainLinear, nCh](uint32_t frames)
     {
-        // Zero the mix buffer first.
-        std::fill(mixed[ch], mixed[ch] + bufSize, 0.0f);
-        for (const auto& bufSet : incomingSets)
+        for (int ch = 0; ch < nCh && ch < (int)outCopy.size(); ++ch)
         {
-            if (ch < (int)bufSet.size())
+            float* dst = outCopy[ch];
+            std::fill(dst, dst + frames, 0.0f);
+            for (const auto& bufSet : inCopy)
             {
-                float* src = bufSet[ch];
-                float* dst = mixed[ch];
-                for (size_t s = 0; s < bufSize; ++s)
-                    dst[s] += src[s] * gainLinear;
+                if (ch < (int)bufSet.size())
+                {
+                    const float* src = bufSet[ch];
+                    for (uint32_t s = 0; s < frames; ++s)
+                        dst[s] += src[s] * gainLinear;
+                }
             }
         }
-    }
+    });
+
     return mixed;
 }
 
@@ -664,6 +673,40 @@ void Lv2Pedalboard::PrepareFromRoutingGraph(
                 incomingSets.push_back(it->second);
         }
 
+        // MergeBox: explicit N-to-1 mix with user-controlled volume.
+        // Uses the same auto-compensation as implicit fan-in; mergeVolume is an
+        // additional dB offset on top (0.0 = unity relative to compensated sum).
+        if (box->isMerge())
+        {
+            std::vector<float*> mixed = SumInputBuffers(incomingSets, nChannels);
+
+            if (box->mergeVolume != 0.0f)
+            {
+                float gain = std::pow(10.0f, box->mergeVolume / 20.0f);
+                auto mixedCopy = mixed;
+                this->processActions.push_back([mixedCopy, gain](uint32_t frames)
+                {
+                    for (float* buf : mixedCopy)
+                        for (uint32_t s = 0; s < frames; ++s)
+                            buf[s] *= gain;
+                });
+            }
+
+            boxOutputs[box->id] = mixed;
+            continue;
+        }
+
+        // AbBox: pass through only the selected input, silence all others.
+        if (box->isAb())
+        {
+            int sel = box->abSelectedInput;
+            if (incomingSets.empty() || sel < 0 || sel >= (int)incomingSets.size())
+                boxOutputs[box->id] = AllocateAudioBuffers(nChannels);
+            else
+                boxOutputs[box->id] = incomingSets[sel];
+            continue;
+        }
+
         // Root boxes (no upstream) receive the pedalboard input buffers.
         std::vector<float*> inputBufs;
         if (incomingSets.empty())
@@ -696,8 +739,6 @@ void Lv2Pedalboard::PrepareFromRoutingGraph(
     if (this->pedalboardOutputBuffers.empty() || this->pedalboardOutputBuffers[0] == nullptr)
     {
         Lv2Log::warning("No OutputBox produced audio — routing graph may be incomplete.");
-        // Find any box with output buffers as a last resort.
-        // unordered_map has no rbegin — find any non-empty output as fallback.
         for (auto& kv : boxOutputs)
         {
             if (!kv.second.empty())
@@ -709,6 +750,19 @@ void Lv2Pedalboard::PrepareFromRoutingGraph(
                 break;
             }
         }
+    }
+
+    // US-09: Ensure pedalboardOutputBuffers covers all physical output channels.
+    // Any slot not mapped by an explicit OutputBox is filled by mirroring the
+    // nearest lower valid channel (e.g. mono→stereo duplication for channel 1).
+    int nOut = pHost->GetNumberOfOutputAudioChannels();
+    while ((int)this->pedalboardOutputBuffers.size() < nOut)
+        this->pedalboardOutputBuffers.push_back(nullptr);
+
+    for (int ch = 1; ch < nOut; ++ch)
+    {
+        if (this->pedalboardOutputBuffers[ch] == nullptr)
+            this->pedalboardOutputBuffers[ch] = this->pedalboardOutputBuffers[ch - 1];
     }
 }
 
