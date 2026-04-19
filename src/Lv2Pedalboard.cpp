@@ -629,6 +629,20 @@ void Lv2Pedalboard::PrepareFromRoutingGraph(
 
     for (Box* box : sorted)
     {
+        if (box->isInput())
+        {
+            // InputBox: expose physical hardware input buffers as this box's output.
+            int nIn = (int)this->pedalboardInputBuffers.size();
+            int want = std::min(box->inputChannelCount, nIn);
+            std::vector<float*> outBufs;
+            for (int c = 0; c < want; ++c)
+                outBufs.push_back(this->pedalboardInputBuffers[c]);
+            if (outBufs.empty() && nIn > 0)
+                outBufs.push_back(this->pedalboardInputBuffers[0]);
+            boxOutputs[box->id] = outBufs;
+            continue;
+        }
+
         if (box->isOutput())
         {
             // Collect all upstream output buffers feeding this OutputBox.

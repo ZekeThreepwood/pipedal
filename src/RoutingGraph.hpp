@@ -74,6 +74,7 @@ enum class BoxType
     Merge,    // Explicit N-to-1 mix with user-controlled levels/pan.
     Ab,       // Explicit N-to-1 switcher — selects one incoming signal.
     Output,   // Terminal: maps to a physical hardware output channel.
+    Input,    // Source: exposes physical hardware input channel(s).
 };
 
 // ---------------------------------------------------------------------------
@@ -116,6 +117,9 @@ public:
     // Output-specific fields (valid when type == BoxType::Output).
     int outputChannelIndex = 0;   // 0 = Out 1, 1 = Out 2, etc.
 
+    // Input-specific fields (valid when type == BoxType::Input).
+    int inputChannelCount = 1;    // 1 = mono, 2 = stereo
+
     // Merge/Ab-specific: user-controlled mix parameters.
     // For implicit fan-in these are ignored; compensation is automatic.
     float mergeVolume = 0.0f;     // dB, relative to compensated sum
@@ -135,6 +139,7 @@ public:
     bool isMerge()  const { return type == BoxType::Merge;  }
     bool isAb()     const { return type == BoxType::Ab;     }
     bool isOutput() const { return type == BoxType::Output; }
+    bool isInput()  const { return type == BoxType::Input;  }
 
     RgControlValue* GetControlValue(const std::string& symbol)
     {

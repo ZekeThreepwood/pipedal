@@ -261,6 +261,16 @@ void Pedalboard::BuildRoutingGraphFromItems(
         {
             box->type = BoxType::Output;
         }
+        else if (item.uri() == INPUT_PEDALBOARD_ITEM_URI_MONO)
+        {
+            box->type = BoxType::Input;
+            box->inputChannelCount = 1;
+        }
+        else if (item.uri() == INPUT_PEDALBOARD_ITEM_URI_STEREO)
+        {
+            box->type = BoxType::Input;
+            box->inputChannelCount = 2;
+        }
         else
         {
             box->type = BoxType::Plugin;

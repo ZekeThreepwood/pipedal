@@ -52,6 +52,7 @@ static BoxType BoxTypeFromString(const std::string& s)
     if (s == "Merge")  return BoxType::Merge;
     if (s == "Ab")     return BoxType::Ab;
     if (s == "Output") return BoxType::Output;
+    if (s == "Input")  return BoxType::Input;
     return BoxType::Plugin;
 }
 
@@ -61,6 +62,7 @@ static const char* BoxTypeToString(BoxType t)
     case BoxType::Merge:  return "Merge";
     case BoxType::Ab:     return "Ab";
     case BoxType::Output: return "Output";
+    case BoxType::Input:  return "Input";
     default:              return "Plugin";
     }
 }
@@ -140,6 +142,7 @@ void Box::write_json(json_writer& writer) const
     wm(writer, first, "pluginName",         pluginName);
     wm(writer, first, "controlValues",      controlValues);
     wm(writer, first, "outputChannelIndex", outputChannelIndex);
+    wm(writer, first, "inputChannelCount",  inputChannelCount);
     wm(writer, first, "mergeVolume",        mergeVolume);
     wm(writer, first, "mergePanL",          mergePanL);
     wm(writer, first, "mergePanR",          mergePanR);
@@ -164,6 +167,7 @@ void Box::read_json(json_reader& reader)
         else if (name == "pluginName")         reader.read(&pluginName);
         else if (name == "controlValues")      reader.read(&controlValues);
         else if (name == "outputChannelIndex") reader.read(&outputChannelIndex);
+        else if (name == "inputChannelCount")  reader.read(&inputChannelCount);
         else if (name == "mergeVolume")        reader.read(&mergeVolume);
         else if (name == "mergePanL")          reader.read(&mergePanL);
         else if (name == "mergePanR")          reader.read(&mergePanR);
