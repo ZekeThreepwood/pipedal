@@ -790,7 +790,10 @@ export class PiPedalModel //implements PiPedalModel
             );
         } else if (message === "onPedalboardChanged") {
             let pedalChangedBody = body as PedalboardChangedBody;
-            this.setModelPedalboard(new Pedalboard().deserialize(pedalChangedBody.pedalboard));
+            const incomingPb = new Pedalboard().deserialize(pedalChangedBody.pedalboard);
+            // Server doesn't know about parallelChains yet — preserve them from in-memory state.
+            incomingPb.parallelChains = this.pedalboard.get().parallelChains;
+            this.setModelPedalboard(incomingPb);
 
         } else if (message === "onMidiValueChanged") {
             let controlChangedBody = body as ControlChangedBody;
