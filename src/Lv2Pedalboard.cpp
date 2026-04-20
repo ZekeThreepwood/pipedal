@@ -744,8 +744,19 @@ void Lv2Pedalboard::PrepareFromRoutingGraph(
         auto pEffect = PreparePluginBox(*box, item, inputBufs, errorList, existingEffects);
         if (!pEffect)
         {
-            // Effect failed to load — pass input buffers straight through.
-            boxOutputs[box->id] = inputBufs;
+            if (!item || item->isEmpty())
+            {
+                // Empty placeholder slot — output silence so no raw input leaks through.
+                auto silBufs = AllocateAudioBuffers(nChannels);
+                for (auto* buf : silBufs)
+                    std::memset(buf, 0, pHost->GetMaxAudioBufferSize() * sizeof(float));
+                boxOutputs[box->id] = std::move(silBufs);
+            }
+            else
+            {
+                // Missing plugin — pass input straight through (bypass).
+                boxOutputs[box->id] = inputBufs;
+            }
             continue;
         }
 
@@ -772,16 +783,24 @@ void Lv2Pedalboard::PrepareFromRoutingGraph(
     }
 
     // US-09: Ensure pedalboardOutputBuffers covers all physical output channels.
-    // Any slot not mapped by an explicit OutputBox is filled by mirroring the
-    // nearest lower valid channel (e.g. mono→stereo duplication for channel 1).
+    // Channels not claimed by any OutputBox are silenced (zeroed buffer).
     int nOut = pHost->GetNumberOfOutputAudioChannels();
     while ((int)this->pedalboardOutputBuffers.size() < nOut)
         this->pedalboardOutputBuffers.push_back(nullptr);
 
-    for (int ch = 1; ch < nOut; ++ch)
+    // Allocate one shared silence buffer for all unclaimed output slots.
+    float* silenceBuffer = nullptr;
+    for (int ch = 0; ch < nOut; ++ch)
     {
         if (this->pedalboardOutputBuffers[ch] == nullptr)
-            this->pedalboardOutputBuffers[ch] = this->pedalboardOutputBuffers[ch - 1];
+        {
+            if (!silenceBuffer)
+            {
+                silenceBuffer = bufferPool.AllocateBuffer<float>(pHost->GetMaxAudioBufferSize());
+                std::memset(silenceBuffer, 0, pHost->GetMaxAudioBufferSize() * sizeof(float));
+            }
+            this->pedalboardOutputBuffers[ch] = silenceBuffer;
+        }
     }
 }
 

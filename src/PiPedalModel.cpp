@@ -518,6 +518,18 @@ void PiPedalModel::SetControl(int64_t clientId, int64_t pedalItemId, const std::
                 return;
             }
         }
+        // InputBox/OutputBox channel-selection controls change buffer routing — full rebuild.
+        if (item != nullptr && (symbol == "inputChannel" || symbol == "outputChannel"))
+        {
+            const std::string &uri = item->uri();
+            if (uri == INPUT_PEDALBOARD_ITEM_URI_MONO || uri == INPUT_PEDALBOARD_ITEM_URI_STEREO ||
+                uri == OUTPUT_PEDALBOARD_ITEM_URI_MONO || uri == OUTPUT_PEDALBOARD_ITEM_URI_STEREO ||
+                uri == OUTPUT_PEDALBOARD_ITEM_URI)
+            {
+                this->FirePedalboardChanged(clientId);
+                return;
+            }
+        }
         PreviewControl(clientId, pedalItemId, symbol, value);
 
         {
