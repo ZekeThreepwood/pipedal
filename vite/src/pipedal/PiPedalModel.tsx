@@ -1683,6 +1683,10 @@ export class PiPedalModel //implements PiPedalModel
         }
         let item = newPedalboard.getItem(instanceId);
         let changed = item.setControlValue(key, value);
+        if (!changed && !item.controlValues.some(cv => cv.key === key)) {
+            item.controlValues.push(new ControlValue(key, value));
+            changed = true;
+        }
 
         if (changed) {
             if (notifyServer) {
