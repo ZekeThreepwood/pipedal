@@ -161,11 +161,13 @@ export interface MainPageSmallScreenProps extends WithStyles<typeof styles> {
     onAppendSplit: (instanceId: number) => void;
     onAddAfter: (instanceId: number) => void;
     onSplitAfter: (instanceId: number) => void;
+    onMergeAfter: (parentSplitId: number) => void;
 
     onCloseDisplayName: () => void;
     onApplyDisplayName: (newName: string, color: string) => void;
 
     getSelectedUri: () => string;
+    excludePluginUris: string[];
 }
 
 const ICON_STYLE = { height: 24, width: 24, fill: "white", opacity: 0.6 };
@@ -270,6 +272,7 @@ const MainPageSmallScreen = withStyles(
                 onDeletePedal,
                 onAddAfter,
                 onSplitAfter,
+                onMergeAfter,
                 onCloseDisplayName,
                 onApplyDisplayName,
                 getSelectedUri,
@@ -294,6 +297,7 @@ const MainPageSmallScreen = withStyles(
                                 hasTinyToolBar={true}
                                 onAddAfter={onAddAfter}
                                 onSplitAfter={onSplitAfter}
+                                onMergeAfter={onMergeAfter}
                             />
                             <div className={classes.pedalboardEdgeSpacer} />
                         </div>
@@ -393,6 +397,7 @@ const MainPageSmallScreen = withStyles(
                             uri={getSelectedUri()}
                             onOk={onLoadOk}
                             onCancel={onLoadCancel}
+                            excludeUris={this.props.excludePluginUris}
                         />
                     )}
 

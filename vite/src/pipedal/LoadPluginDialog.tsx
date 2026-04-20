@@ -172,6 +172,7 @@ interface PluginGridProps extends WithStyles<typeof pluginGridStyles> {
   theme: Theme;
   open: boolean;
   modGuiOnly?: boolean;
+  excludeUris?: string[];
 }
 
 type PluginGridState = {
@@ -573,8 +574,10 @@ export const LoadPluginDialog = withTheme(
           let searchFilter = new SearchFilter(searchString);
           let rootClass = this.model.plugin_classes.get();
 
+          const excludeSet = new Set(this.props.excludeUris ?? []);
           for (let i = 0; i < plugins.length; ++i) {
             let plugin = plugins[i];
+            if (excludeSet.has(plugin.uri)) continue;
             if (this.props.modGuiOnly == true && !plugin.modGui) continue;
             try {
               if (

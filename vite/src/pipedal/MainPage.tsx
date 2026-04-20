@@ -12,7 +12,9 @@ import { PiPedalModel, PiPedalModelFactory } from "./PiPedalModel";
 import {
   Pedalboard,
   PedalboardItem,
+  PedalboardSplitItem,
 } from "./Pedalboard";
+import { INPUT_BOX_MONO_URI, INPUT_BOX_STEREO_URI } from "./Lv2Plugin";
 import InputIcon from "@mui/icons-material/Input";
 import LoadPluginDialog from "./LoadPluginDialog";
 import Switch from "@mui/material/Switch";
@@ -410,6 +412,39 @@ export const MainPage = withTheme(
 
       onLoadCancel(): void {
         this.setState({ loadDialogOpen: false });
+      }
+
+      onMergeAfterSplit(parentSplitId: number) {
+        const pedalboard = this.model.pedalboard.get();
+        const items = pedalboard.items;
+        const idx = items.findIndex(item => item.instanceId === parentSplitId);
+        if (idx === -1) return;
+        if (idx < items.length - 1) {
+          // Merge block already exists — just select it
+          this.setSelection(items[idx + 1].instanceId);
+          return;
+        }
+        const newId = this.model.addPedalboardItem(parentSplitId, true);
+        this.setSelection(newId);
+        this.setState({ loadDialogOpen: true });
+      }
+
+      isChainStart(instanceId: number): boolean {
+        const pedalboard = this.model.pedalboard.get();
+        return this.isFirstInChain(pedalboard.items, instanceId);
+      }
+
+      isFirstInChain(items: PedalboardItem[], instanceId: number): boolean {
+        if (items.length === 0) return false;
+        if (items[0].instanceId === instanceId) return true;
+        for (const item of items) {
+          if (item.isSplit()) {
+            const split = item as PedalboardSplitItem;
+            if (this.isFirstInChain(split.topChain, instanceId)) return true;
+            if (this.isFirstInChain(split.bottomChain, instanceId)) return true;
+          }
+        }
+        return false;
       }
 
       onLoadOk(selectedUri: string): void {
@@ -964,6 +999,7 @@ export const MainPage = withTheme(
               }
               onAddAfter={(id: number) => this.onAddBlockAfter(id)}
               onSplitAfter={(id: number) => this.onAppendSplit(id)}
+              onMergeAfter={(parentSplitId: number) => this.onMergeAfterSplit(parentSplitId)}
               onCloseDisplayName={() =>
                 this.setState({ displayNameDialogOpen: false })
               }
@@ -977,6 +1013,7 @@ export const MainPage = withTheme(
                 }
               }}
               getSelectedUri={() => this.getSelectedUri()}
+              excludePluginUris={this.isChainStart(this.state.selectedPedal) ? [] : [INPUT_BOX_MONO_URI, INPUT_BOX_STEREO_URI]}
             />
           );
         }
@@ -1007,6 +1044,7 @@ export const MainPage = withTheme(
                 hasTinyToolBar={this.props.hasTinyToolBar}
                 onAddAfter={(id) => this.onAddBlockAfter(id)}
                 onSplitAfter={(id) => this.onAppendSplit(id)}
+                onMergeAfter={(parentSplitId) => this.onMergeAfterSplit(parentSplitId)}
               />
             </div>
 
@@ -1262,6 +1300,7 @@ export const MainPage = withTheme(
                 uri={this.getSelectedUri()}
                 onOk={this.onLoadOk}
                 onCancel={this.onLoadCancel}
+                excludeUris={this.isChainStart(this.state.selectedPedal) ? [] : [INPUT_BOX_MONO_URI, INPUT_BOX_STEREO_URI]}
               />
             )}
 

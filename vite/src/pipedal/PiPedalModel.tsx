@@ -1890,7 +1890,12 @@ export class PiPedalModel //implements PiPedalModel
         let newPedalboard = pedalboard.clone();
         this.updateVst3State(newPedalboard);
 
-        let result = newPedalboard.deleteItem(instanceId);
+        let result: number | null;
+        if (newPedalboard.isOnlyItemInSplitBranch(instanceId)) {
+            result = newPedalboard.collapseSplitContaining(instanceId);
+        } else {
+            result = newPedalboard.deleteItem(instanceId);
+        }
         if (result !== null) {
             if (newPedalboard.items.length === 0) {
                 const empty = newPedalboard.createEmptyItem();

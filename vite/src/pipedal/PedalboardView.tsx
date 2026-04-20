@@ -27,6 +27,7 @@ import IconButton from "@mui/material/IconButton";
 import Menu from "@mui/material/Menu";
 import MenuItem from "@mui/material/MenuItem";
 import AddIcon from "@mui/icons-material/Add";
+import CallMergeIcon from "@mui/icons-material/CallMerge";
 
 import { Theme } from "@mui/material/styles";
 import { PiPedalModel, PiPedalModelFactory } from "./PiPedalModel";
@@ -64,9 +65,6 @@ const DISABLED_CONNECTOR_COLOR = isDarkMode() ? "#666" : "#CCC";
 const CELL_WIDTH: number = 96;
 const CELL_HEIGHT: number = 64;
 const FRAME_SIZE: number = 36;
-
-const STROKE_WIDTH = 3;
-const STEREO_STROKE_WIDTH = 6;
 
 const I_SVG_STROKE_WIDTH = 3;
 const I_SVG_STEREO_STROKE_WIDTH = 6;
@@ -227,6 +225,7 @@ interface PedalboardProps extends WithStyles<typeof pedalboardStyles> {
   enableStructureEditing: boolean;
   onAddAfter?: (instanceId: number) => void;
   onSplitAfter?: (instanceId: number) => void;
+  onMergeAfter?: (parentSplitId: number) => void;
 }
 interface LayoutSize {
   width: number;
@@ -237,6 +236,7 @@ type PedalboardState = {
   pedalboard?: Pedalboard;
   splitMenuAnchor: HTMLElement | null;
   splitMenuInstanceId: number;
+  showBlockButtons: boolean;
 };
 
 const EMPTY_PEDALS: PedalLayout[] = [];
@@ -244,12 +244,15 @@ const EMPTY_PEDALS: PedalLayout[] = [];
 function makeChain(
   model: PiPedalModel,
   uiItems?: PedalboardItem[],
+  insideSplit: boolean = false,
+  parentSplitId: number = -1,
 ): PedalLayout[] {
   let result: PedalLayout[] = [];
   if (uiItems) {
     for (let i = 0; i < uiItems.length; ++i) {
       let item = uiItems[i];
-      result.push(new PedalLayout(model, item));
+      let layout = new PedalLayout(model, item, insideSplit, parentSplitId);
+      result.push(layout);
     }
   }
   return result;
@@ -261,6 +264,9 @@ class PedalLayout {
   pluginType: PluginType = PluginType.Plugin;
   iconUrl: string = "";
   iconColor: string = "";
+  isInsideSplit: boolean = false;
+  parentSplitId: number = -1;
+  hasMergeOutput: boolean = false; // set during doLayout2_ when split has a next sibling
 
   bounds: Rect = new Rect();
 
@@ -295,7 +301,9 @@ class PedalLayout {
     t.numberOfOutputs = 0;
     return t;
   }
-  constructor(model?: PiPedalModel, pedalItem?: PedalboardItem) {
+  constructor(model?: PiPedalModel, pedalItem?: PedalboardItem, insideSplit: boolean = false, parentSplitId: number = -1) {
+    this.isInsideSplit = insideSplit;
+    this.parentSplitId = parentSplitId;
     if (model === undefined && pedalItem === undefined) {
       return;
     }
@@ -308,8 +316,8 @@ class PedalLayout {
       let splitter = pedalItem as PedalboardSplitItem;
 
       this.pluginType = PluginType.UtilityPlugin;
-      this.topChildren = makeChain(model, splitter.topChain);
-      this.bottomChildren = makeChain(model, splitter.bottomChain);
+      this.topChildren = makeChain(model, splitter.topChain, true, splitter.instanceId);
+      this.bottomChildren = makeChain(model, splitter.bottomChain, true, splitter.instanceId);
 
       this.numberOfInputs = 2;
       this.numberOfOutputs = 2;
@@ -438,6 +446,7 @@ const PedalboardView = withTheme(
           pedalboard: this.model.pedalboard.get(),
           splitMenuAnchor: null,
           splitMenuInstanceId: -1,
+          showBlockButtons: false,
         };
         this.onPedalboardChanged = this.onPedalboardChanged.bind(this);
         this.frameRef = React.createRef();
@@ -703,7 +712,8 @@ const PedalboardView = withTheme(
             bottomBounds.offset(0, dyBottom);
             bounds.accumulate(bottomBounds);
 
-            lp.cx = Math.max(lp.cx, topCx) + CELL_WIDTH;
+            layoutItem.hasMergeOutput = i < layoutItems.length - 1;
+            lp.cx = Math.max(lp.cx, topCx) + (layoutItem.hasMergeOutput ? CELL_WIDTH : 0);
             lp.cy = y0;
 
             layoutItem.bounds.width = lp.cx - layoutItem.bounds.x;
@@ -779,7 +789,10 @@ const PedalboardView = withTheme(
         } else {
           this.lastClickTime = now;
           this.lastClickInstanceId = instanceId;
-          this.setSelection(instanceId);
+          this.setState({ showBlockButtons: true });
+          if (instanceId !== this.props.selectedId) {
+            this.setSelection(instanceId);
+          }
         }
       }
       setSelection(instanceId: number) {
@@ -1036,270 +1049,38 @@ const PedalboardView = withTheme(
           );
         }
 
+        // If no next item in main chain, this is a pure Y-fork — no merge wire
+        if (!item.hasMergeOutput) return;
+
+        // Draw merge wires from both branch ends back to the merge output cell
         let lastTop = item.topChildren[item.topChildren.length - 1];
         let lastBottom = item.bottomChildren[item.bottomChildren.length - 1];
 
-        let xTop = lastTop.bounds.right - CELL_WIDTH / 2;
-        let xBottom = lastBottom.bounds.right - CELL_WIDTH / 2;
+        let xTopLast = lastTop.bounds.right - CELL_WIDTH / 2;
+        let xBottomLast = lastBottom.bounds.right - CELL_WIDTH / 2;
+        let xConverge = item.bounds.right - CELL_WIDTH;
+        let xMerge = item.bounds.right - CELL_WIDTH / 2;
 
-        let xEnd = shortSplitOutput
-          ? item.bounds.right
-          : item.bounds.right + CELL_WIDTH / 2;
-        let xTee0 = item.bounds.right - CELL_WIDTH / 2;
+        let color = enabled ? ENABLED_CONNECTOR_COLOR : DISABLED_CONNECTOR_COLOR;
+        let strokeW = item.numberOfOutputs === 2 ? SVG_STEREO_STROKE_WIDTH : SVG_STROKE_WIDTH;
 
-        let firstPath: string; // top or bottom depending on draw order.
-        let secondPath: string; // top or bottom depending on draw order.
+        let topMergePath = new SvgPathBuilder()
+          .moveTo(xTopLast, yTop)
+          .lineTo(xConverge, yTop)
+          .lineTo(xConverge, y_)
+          .lineTo(xMerge, y_)
+          .toString();
+        let bottomMergePath = new SvgPathBuilder()
+          .moveTo(xBottomLast, yBottom)
+          .lineTo(xConverge, yBottom)
+          .lineTo(xConverge, y_)
+          .toString();
 
-        let firstPathStereo: boolean;
-        let secondPathStereo: boolean;
-        let firstPathAbsent: boolean;
-        let secondPathAbsent: boolean;
-        let firstPathEnabled: boolean;
-        let secondPathEnabled: boolean;
-        let xTee: number;
-
-        let monoAdjustment = (STEREO_STROKE_WIDTH - STROKE_WIDTH) / 2;
-
-        let bottomPathFirst = topEnabled && !bottomEnabled;
-        let topPathFirst = bottomEnabled && !topEnabled;
-
-        // Third case: L/R stereo output, when both outputs are mono, requires a third stroke.
-        let thirdPath: string | null = null; // for L/R stereo output (which can be stereo even if both outputs are mono)
-        let hasThirdPath =
-          item.numberOfOutputs === 2 &&
-          lastTop.numberOfOutputs !== 2 &&
-          lastBottom.numberOfOutputs !== 2;
-
-        if (hasThirdPath) {
-          firstPathStereo = false;
-          secondPathStereo = false;
-          firstPathAbsent =
-            lastTop.numberOfOutputs === 0 || item.numberOfOutputs === 0;
-          secondPathAbsent =
-            lastBottom.numberOfOutputs === 0 || item.numberOfOutputs === 0;
-          xTee = xTee0 - monoAdjustment;
-          firstPath = new SvgPathBuilder()
-            .moveTo(xBottom, yBottom)
-            .lineTo(xTee, yBottom)
-            .lineTo(xTee, y_)
-            .toString();
-
-          secondPath = new SvgPathBuilder()
-            .moveTo(xTop, yTop)
-            .lineTo(xTee, yTop)
-            .lineTo(xTee, y_)
-            .toString();
-
-          hasThirdPath = true;
-          thirdPath = new SvgPathBuilder()
-            .moveTo(xTee0, y_)
-            .lineTo(xEnd, y_)
-            .toString();
-          firstPathEnabled = bottomEnabled;
-          secondPathEnabled = topEnabled;
-        } else if (
-          bottomPathFirst ||
-          (topEnabled && lastTop.numberOfOutputs === 2)
-        ) {
-          // draw the bottom path first.
-          firstPathStereo =
-            item.numberOfOutputs === 2 && lastBottom.numberOfOutputs === 2;
-          secondPathStereo =
-            item.numberOfOutputs === 2 && lastTop.numberOfOutputs === 2;
-          firstPathAbsent =
-            item.numberOfOutputs === 0 || lastBottom.numberOfOutputs === 0;
-          secondPathAbsent =
-            item.numberOfOutputs === 0 || lastTop.numberOfOutputs === 0;
-
-          xTee = firstPathStereo ? xTee0 : xTee0 - monoAdjustment;
-          firstPath = new SvgPathBuilder()
-            .moveTo(xBottom, yBottom)
-            .lineTo(xTee, yBottom)
-            .lineTo(xTee, y_)
-            .toString();
-          xTee = secondPathStereo ? xTee0 : xTee0 - monoAdjustment;
-
-          secondPath = new SvgPathBuilder()
-            .moveTo(xTop, yTop)
-            .lineTo(xTee, yTop)
-            .lineTo(xTee, y_)
-            .lineTo(xEnd, y_)
-            .toString();
-          firstPathEnabled = bottomEnabled;
-          secondPathEnabled = topEnabled;
-        } else {
-          // draw the top path first.
-          firstPathStereo =
-            item.numberOfOutputs === 2 && lastTop.numberOfOutputs === 2;
-          secondPathStereo =
-            item.numberOfOutputs === 2 && lastBottom.numberOfOutputs === 2;
-          firstPathAbsent =
-            item.numberOfOutputs === 0 || lastTop.numberOfOutputs === 0;
-          secondPathAbsent =
-            item.numberOfOutputs === 0 || lastBottom.numberOfOutputs === 0;
-
-          xTee = firstPathStereo ? xTee0 : xTee0 - monoAdjustment;
-          firstPath = new SvgPathBuilder()
-            .moveTo(xTop, yTop)
-            .lineTo(xTee, yTop)
-            .lineTo(xTee, y_)
-            .toString();
-
-          xTee = secondPathStereo ? xTee0 : xTee0 - monoAdjustment;
-          secondPath = new SvgPathBuilder()
-            .moveTo(xBottom, yBottom)
-            .lineTo(xTee, yBottom)
-            .lineTo(xTee, y_)
-            .lineTo(xEnd, y_)
-            .toString();
-
-          firstPathEnabled = topEnabled;
-          secondPathEnabled = bottomEnabled;
-        }
-        let firstPathColor = firstPathEnabled
-          ? ENABLED_CONNECTOR_COLOR
-          : DISABLED_CONNECTOR_COLOR;
-        let secondPathColor = secondPathEnabled
-          ? ENABLED_CONNECTOR_COLOR
-          : DISABLED_CONNECTOR_COLOR;
-
-        if (bottomPathFirst || topPathFirst) {
-          // display stereo strokes with cutoff line.
-          if (firstPathStereo) {
-            output.push(
-              <path
-                key={this.renderKey++}
-                d={firstPath}
-                stroke={firstPathColor}
-                strokeWidth={SVG_STEREO_STROKE_WIDTH}
-              />,
-            );
-            output.push(
-              <path
-                key={this.renderKey++}
-                d={firstPath}
-                stroke={this.bgColor}
-                strokeWidth={SVG_STROKE_WIDTH}
-              />,
-            );
-          } else if (!firstPathAbsent) {
-            output.push(
-              <path
-                key={this.renderKey++}
-                d={firstPath}
-                stroke={firstPathColor}
-                strokeWidth={SVG_STROKE_WIDTH}
-              />,
-            );
-          }
-          if (secondPathStereo) {
-            output.push(
-              <path
-                key={this.renderKey++}
-                d={secondPath}
-                stroke={secondPathColor}
-                strokeWidth={SVG_STEREO_STROKE_WIDTH}
-              />,
-            );
-            output.push(
-              <path
-                key={this.renderKey++}
-                d={secondPath}
-                stroke={this.bgColor}
-                strokeWidth={SVG_STROKE_WIDTH}
-              />,
-            );
-          } else if (!secondPathAbsent) {
-            output.push(
-              <path
-                key={this.renderKey++}
-                d={secondPath}
-                stroke={secondPathColor}
-                strokeWidth={SVG_STROKE_WIDTH}
-              />,
-            );
-          }
-        } else {
-          // stereo strokes merge.
-          if (firstPathStereo) {
-            output.push(
-              <path
-                key={this.renderKey++}
-                d={firstPath}
-                stroke={firstPathColor}
-                strokeWidth={SVG_STEREO_STROKE_WIDTH}
-              />,
-            );
-          } else if (!firstPathAbsent) {
-            output.push(
-              <path
-                key={this.renderKey++}
-                d={firstPath}
-                stroke={firstPathColor}
-                strokeWidth={SVG_STROKE_WIDTH}
-              />,
-            );
-          }
-          if (secondPathStereo) {
-            output.push(
-              <path
-                key={this.renderKey++}
-                d={secondPath}
-                stroke={secondPathColor}
-                strokeWidth={SVG_STEREO_STROKE_WIDTH}
-              />,
-            );
-          } else if (!secondPathAbsent) {
-            output.push(
-              <path
-                key={this.renderKey++}
-                d={secondPath}
-                stroke={secondPathColor}
-                strokeWidth={SVG_STROKE_WIDTH}
-              />,
-            );
-          }
-
-          // draw stereo inner lines.
-          if (firstPathStereo) {
-            output.push(
-              <path
-                key={this.renderKey++}
-                d={firstPath}
-                stroke={this.bgColor}
-                strokeWidth={SVG_STROKE_WIDTH}
-              />,
-            );
-          }
-          if (secondPathStereo) {
-            output.push(
-              <path
-                key={this.renderKey++}
-                d={secondPath}
-                stroke={this.bgColor}
-                strokeWidth={SVG_STROKE_WIDTH}
-              />,
-            );
-          }
-        }
-        if (thirdPath != null) {
-          // stereo output of L/R splitter
-          output.push(
-            <path
-              key={this.renderKey++}
-              d={thirdPath}
-              stroke={secondPathColor}
-              strokeWidth={SVG_STEREO_STROKE_WIDTH}
-            />,
-          );
-          output.push(
-            <path
-              key={this.renderKey++}
-              d={thirdPath}
-              stroke={this.bgColor}
-              strokeWidth={SVG_STROKE_WIDTH}
-            />,
-          );
+        output.push(<path key={this.renderKey++} d={bottomMergePath} stroke={color} strokeWidth={strokeW} />);
+        output.push(<path key={this.renderKey++} d={topMergePath} stroke={color} strokeWidth={strokeW} />);
+        if (item.numberOfOutputs === 2) {
+          output.push(<path key={this.renderKey++} d={bottomMergePath} stroke={this.bgColor} strokeWidth={SVG_STROKE_WIDTH} />);
+          output.push(<path key={this.renderKey++} d={topMergePath} stroke={this.bgColor} strokeWidth={SVG_STROKE_WIDTH} />);
         }
       }
       getScrollContainer() {
@@ -1521,56 +1302,27 @@ const PedalboardView = withTheme(
               );
               break;
             default:
-              if (item.isInputBox() || item.isOutputBox()) {
+              if (item.isOutputBox()) {
                 result.push(
                   <div
                     key={this.renderKey++}
-                    className={classes.splitItem}
-                    style={{
-                      left: item.bounds.x,
-                      top: item.bounds.y,
-                      width: item.bounds.width,
-                    }}
+                    className={classes.pedalItem}
+                    style={{ left: item.bounds.x, top: item.bounds.y }}
                   >
-                    <div className={classes.splitStart}>
-                      {this.pedalButton(
-                        item.pedalItem?.instanceId ?? -1,
-                        item.pluginType,
-                        item.iconColor,
-                        false,
-                        true,
-                        false,
-                        false,
-                        false,
-                      )}
-                    </div>
+                    {this.pedalButton(
+                      item.pedalItem?.instanceId ?? -1,
+                      item.pluginType,
+                      item.iconColor,
+                      false,
+                      true,
+                      false,
+                      false,
+                      false,
+                    )}
                   </div>,
                 );
               } else if (item.isSplitter()) {
-                result.push(
-                  <div
-                    key={this.renderKey++}
-                    className={classes.splitItem}
-                    style={{
-                      left: item.bounds.x,
-                      top: item.bounds.y,
-                      width: item.bounds.width,
-                    }}
-                  >
-                    <div className={classes.splitStart}>
-                      {this.pedalButton(
-                        item.pedalItem?.instanceId ?? -1,
-                        this.getSplitterIcon(item),
-                        "",
-                        false,
-                        true,
-                        true,
-                        false,
-                        false,
-                      )}
-                    </div>
-                  </div>,
-                );
+                // Splitter is invisible — Y-wire connectors are drawn by renderSplitConnectors
               } else {
                 result.push(
                   <div
@@ -1627,22 +1379,22 @@ const PedalboardView = withTheme(
                       blockInstanceId,
                       pluginType,
                       item.pedalItem?.iconColor ?? "",
-                      !item.isEmpty(),
+                      !item.isEmpty() && !item.isInputBox(),
                       item.pedalItem?.isEnabled ?? false,
-                      true,
+                      !item.isInputBox(),
                       pluginMissing,
                       uiPlugin
                         ? uiPlugin.has_midi_input !== 0 ||
                             uiPlugin.has_midi_output !== 0
                         : false,
                     )}
-                    {isSelected && this.props.enableStructureEditing && (
+                    {isSelected && this.props.enableStructureEditing && this.state.showBlockButtons && (
                       <>
                         <div style={{ position: "absolute", right: -12, top: CELL_HEIGHT / 2 - 12, zIndex: 20 }}>
                           <IconButton
                             size="small"
                             style={{ width: 24, height: 24, background: this.props.theme.palette.background.paper, border: "1px solid #888" }}
-                            onClick={(e) => { e.stopPropagation(); this.props.onAddAfter?.(blockInstanceId); }}
+                            onClick={(e) => { e.stopPropagation(); this.setState({ showBlockButtons: false }); this.props.onAddAfter?.(blockInstanceId); }}
                           >
                             <AddIcon style={{ width: 16, height: 16 }} />
                           </IconButton>
@@ -1651,9 +1403,19 @@ const PedalboardView = withTheme(
                           <IconButton
                             size="small"
                             style={{ width: 24, height: 24, background: this.props.theme.palette.background.paper, border: "1px solid #888" }}
-                            onClick={(e) => this.openSplitMenu(e, blockInstanceId)}
+                            onClick={(e) => {
+                              this.setState({ showBlockButtons: false });
+                              if (item.isInsideSplit) {
+                                this.props.onMergeAfter?.(item.parentSplitId);
+                              } else {
+                                this.openSplitMenu(e, blockInstanceId);
+                              }
+                            }}
                           >
-                            <AddIcon style={{ width: 16, height: 16 }} />
+                            {item.isInsideSplit
+                              ? <CallMergeIcon style={{ width: 16, height: 16 }} />
+                              : <AddIcon style={{ width: 16, height: 16 }} />
+                            }
                           </IconButton>
                         </div>
                       </>

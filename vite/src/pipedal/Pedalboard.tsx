@@ -774,7 +774,7 @@ export class Pedalboard implements Deserializable<Pedalboard> {
         return null;
     }
 
-    canDeleteItem_(instanceId: number,items: PedalboardItem[]): boolean
+    canDeleteItem_(instanceId: number, items: PedalboardItem[], insideSplit: boolean = false): boolean
     {
         for (let i = 0; i < items.length; ++i)
         {
@@ -782,20 +782,73 @@ export class Pedalboard implements Deserializable<Pedalboard> {
             if (item.instanceId === instanceId)
             {
                 if (items.length > 1) return true;
-                return !item.isEmpty(); // can delete if there's one non-empty item.
+                if (insideSplit) return true; // single item in a split branch — will collapse the split
+                return !item.isEmpty();
             }
             if (item.isSplit())
             {
                 let splitItem = item as PedalboardSplitItem;
-                if (this.canDeleteItem_(instanceId,splitItem.topChain))
-                {
-                    return true;
-                }
-                if (this.canDeleteItem_(instanceId,splitItem.bottomChain))
-                {
-                    return true;
-                }
+                if (this.canDeleteItem_(instanceId, splitItem.topChain, true)) return true;
+                if (this.canDeleteItem_(instanceId, splitItem.bottomChain, true)) return true;
             }
+        }
+        return false;
+    }
+
+    private collapseSplitContaining_(instanceId: number, items: PedalboardItem[]): number | null
+    {
+        for (let i = 0; i < items.length; ++i)
+        {
+            const item = items[i];
+            if (!item.isSplit()) continue;
+            const split = item as PedalboardSplitItem;
+
+            let keepChain: PedalboardItem[] | null = null;
+            if (split.topChain.length === 1 && split.topChain[0].instanceId === instanceId) {
+                keepChain = split.bottomChain;
+            } else if (split.bottomChain.length === 1 && split.bottomChain[0].instanceId === instanceId) {
+                keepChain = split.topChain;
+            }
+
+            if (keepChain !== null) {
+                items.splice(i, 1, ...keepChain);
+                return keepChain[0]?.instanceId ?? -1;
+            }
+
+            let t = this.collapseSplitContaining_(instanceId, split.topChain);
+            if (t !== null) return t;
+            t = this.collapseSplitContaining_(instanceId, split.bottomChain);
+            if (t !== null) return t;
+        }
+        return null;
+    }
+
+    collapseSplitContaining(instanceId: number): number
+    {
+        const result = this.collapseSplitContaining_(instanceId, this.items);
+        if (result === null || result === -1) {
+            // fallback: just replace with empty
+            const newItem = this.createEmptyItem();
+            this.items = [newItem];
+            return newItem.instanceId;
+        }
+        return result;
+    }
+
+    isOnlyItemInSplitBranch(instanceId: number): boolean
+    {
+        return this.isOnlyItemInSplitBranch_(instanceId, this.items);
+    }
+
+    private isOnlyItemInSplitBranch_(instanceId: number, items: PedalboardItem[]): boolean
+    {
+        for (const item of items) {
+            if (!item.isSplit()) continue;
+            const split = item as PedalboardSplitItem;
+            if (split.topChain.length === 1 && split.topChain[0].instanceId === instanceId) return true;
+            if (split.bottomChain.length === 1 && split.bottomChain[0].instanceId === instanceId) return true;
+            if (this.isOnlyItemInSplitBranch_(instanceId, split.topChain)) return true;
+            if (this.isOnlyItemInSplitBranch_(instanceId, split.bottomChain)) return true;
         }
         return false;
     }
@@ -908,7 +961,7 @@ export class Pedalboard implements Deserializable<Pedalboard> {
         result.topChain = [ this.createEmptyItem()];
         result.bottomChain = [ this.createEmptyItem()];
         result.controlValues = [
-            new ControlValue(PedalboardSplitItem.TYPE_KEY, 0),
+            new ControlValue(PedalboardSplitItem.TYPE_KEY, 1),
             new ControlValue(PedalboardSplitItem.SELECT_KEY,0),
             new ControlValue(PedalboardSplitItem.MIX_KEY,0),
             new ControlValue(PedalboardSplitItem.PANL_KEY,0),
