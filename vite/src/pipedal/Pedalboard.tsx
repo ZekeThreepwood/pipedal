@@ -618,9 +618,10 @@ export class Pedalboard implements Deserializable<Pedalboard> {
     routingGraph: RoutingGraph = new RoutingGraph();
     parallelChains: PedalboardItem[][] = [];
 
-    // Exclude routingGraph from JSON serialization — server rebuilds it from items_.
+    // Exclude routingGraph and parallelChains from JSON sent to server — C++ backend
+    // doesn't yet support parallelChains; it would crash on the unknown field.
     toJSON(): object {
-        const { routingGraph: _rg, ...rest } = this as any;
+        const { routingGraph: _rg, parallelChains: _pc, ...rest } = this as any;
         return rest;
     }
 
