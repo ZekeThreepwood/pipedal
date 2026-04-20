@@ -162,6 +162,7 @@ export interface MainPageSmallScreenProps extends WithStyles<typeof styles> {
     onAddAfter: (instanceId: number) => void;
     onSplitAfter: (instanceId: number) => void;
     onMergeAfter: (parentSplitId: number) => void;
+    onAddParallelChain: () => void;
 
     onCloseDisplayName: () => void;
     onApplyDisplayName: (newName: string, color: string) => void;
@@ -273,6 +274,7 @@ const MainPageSmallScreen = withStyles(
                 onAddAfter,
                 onSplitAfter,
                 onMergeAfter,
+                onAddParallelChain,
                 onCloseDisplayName,
                 onApplyDisplayName,
                 getSelectedUri,
@@ -298,6 +300,7 @@ const MainPageSmallScreen = withStyles(
                                 onAddAfter={onAddAfter}
                                 onSplitAfter={onSplitAfter}
                                 onMergeAfter={onMergeAfter}
+                                onAddParallelChain={onAddParallelChain}
                             />
                             <div className={classes.pedalboardEdgeSpacer} />
                         </div>

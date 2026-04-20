@@ -1891,7 +1891,9 @@ export class PiPedalModel //implements PiPedalModel
         this.updateVst3State(newPedalboard);
 
         let result: number | null;
-        if (newPedalboard.isOnlyItemInSplitBranch(instanceId)) {
+        if (newPedalboard.isOnlyItemInParallelChain(instanceId)) {
+            result = newPedalboard.removeParallelChainContaining(instanceId);
+        } else if (newPedalboard.isOnlyItemInSplitBranch(instanceId)) {
             result = newPedalboard.collapseSplitContaining(instanceId);
         } else {
             result = newPedalboard.deleteItem(instanceId);
@@ -2047,6 +2049,16 @@ export class PiPedalModel //implements PiPedalModel
         this.setModelPedalboard(newPedalboard);
         this.updateServerPedalboard();
         return newItem.instanceId;
+    }
+    addParallelChain(): number {
+        const pedalboard = this.pedalboard.get();
+        const newPedalboard = pedalboard.clone();
+        this.updateVst3State(newPedalboard);
+        const newItemId = newPedalboard.addParallelChain();
+        newPedalboard.selectedPlugin = newItemId;
+        this.setModelPedalboard(newPedalboard);
+        this.updateServerPedalboard();
+        return newItemId;
     }
     addPedalboardSplitItem(instanceId: number, append: boolean): number {
         let pedalboard = this.pedalboard.get();

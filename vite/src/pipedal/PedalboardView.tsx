@@ -226,6 +226,7 @@ interface PedalboardProps extends WithStyles<typeof pedalboardStyles> {
   onAddAfter?: (instanceId: number) => void;
   onSplitAfter?: (instanceId: number) => void;
   onMergeAfter?: (parentSplitId: number) => void;
+  onAddParallelChain?: () => void;
 }
 interface LayoutSize {
   width: number;
@@ -1076,11 +1077,19 @@ const PedalboardView = withTheme(
           .lineTo(xConverge, y_)
           .toString();
 
+        // Wire from merge point to next block in main chain
+        let outputPath = new SvgPathBuilder()
+          .moveTo(xMerge, y_)
+          .lineTo(xMerge + CELL_WIDTH, y_)
+          .toString();
+
         output.push(<path key={this.renderKey++} d={bottomMergePath} stroke={color} strokeWidth={strokeW} />);
         output.push(<path key={this.renderKey++} d={topMergePath} stroke={color} strokeWidth={strokeW} />);
+        output.push(<path key={this.renderKey++} d={outputPath} stroke={color} strokeWidth={strokeW} />);
         if (item.numberOfOutputs === 2) {
           output.push(<path key={this.renderKey++} d={bottomMergePath} stroke={this.bgColor} strokeWidth={SVG_STROKE_WIDTH} />);
           output.push(<path key={this.renderKey++} d={topMergePath} stroke={this.bgColor} strokeWidth={SVG_STROKE_WIDTH} />);
+          output.push(<path key={this.renderKey++} d={outputPath} stroke={this.bgColor} strokeWidth={SVG_STROKE_WIDTH} />);
         }
       }
       getScrollContainer() {
@@ -1619,17 +1628,35 @@ const PedalboardView = withTheme(
 
       currentLayout?: PedalLayout[];
       private renderKey: number = 0;
+
+      private readonly PARALLEL_SEPARATOR = 24;
+
       render() {
         const classes = withStyles.getClasses(this.props);
         this.renderKey = 0;
-        let layoutChain = makeChain(this.model, this.state.pedalboard?.items);
-        if (layoutChain.length !== 0) {
-          this.markStereoOutputs(layoutChain, 2, 2);
+
+        const pedalboard = this.state.pedalboard;
+        const chainItemArrays: (PedalboardItem[] | undefined)[] = [
+          pedalboard?.items,
+          ...(pedalboard?.parallelChains ?? []),
+        ];
+
+        const allLayoutChains = chainItemArrays.map(items => makeChain(this.model, items));
+        for (const lc of allLayoutChains) {
+          if (lc.length !== 0) this.markStereoOutputs(lc, 2, 2);
+        }
+        const allLayoutSizes = allLayoutChains.map(lc => this.doLayout(lc));
+
+        const totalWidth = allLayoutSizes.reduce((max, s) => Math.max(max, s.width), 1);
+
+        const chainYOffsets: number[] = [0];
+        let totalHeight = allLayoutSizes[0]?.height ?? 1;
+        for (let i = 1; i < allLayoutChains.length; ++i) {
+          chainYOffsets.push(totalHeight + this.PARALLEL_SEPARATOR);
+          totalHeight += this.PARALLEL_SEPARATOR + allLayoutSizes[i].height;
         }
 
-        let layoutSize = this.doLayout(layoutChain);
-
-        this.currentLayout = layoutChain; // save for mouse processing &c.
+        this.currentLayout = allLayoutChains[0]; // DnD only on main chain
 
         return (
           <>
@@ -1637,12 +1664,31 @@ const PedalboardView = withTheme(
               <div
                 className={classes.container}
                 ref={this.frameRef}
-                style={{
-                  width: layoutSize.width,
-                  height: layoutSize.height,
-                }}
+                style={{ width: totalWidth, height: totalHeight }}
               >
-                {this.renderChain(layoutChain, layoutSize)}
+                {allLayoutChains.map((lc, i) => (
+                  <React.Fragment key={i}>
+                    {i > 0 && (
+                      <div style={{
+                        position: 'absolute',
+                        left: 0,
+                        right: 0,
+                        top: chainYOffsets[i] - this.PARALLEL_SEPARATOR / 2,
+                        height: 1,
+                        background: 'rgba(128,128,128,0.3)',
+                      }} />
+                    )}
+                    <div style={{
+                      position: 'absolute',
+                      left: 0,
+                      top: chainYOffsets[i],
+                      width: totalWidth,
+                      height: allLayoutSizes[i].height,
+                    }}>
+                      {this.renderChain(lc, allLayoutSizes[i])}
+                    </div>
+                  </React.Fragment>
+                ))}
               </div>
             </div>
             <Menu
@@ -1653,8 +1699,8 @@ const PedalboardView = withTheme(
               <MenuItem onClick={() => { const id = this.state.splitMenuInstanceId; this.closeSplitMenu(); this.props.onSplitAfter?.(id); }}>
                 Split chain
               </MenuItem>
-              <MenuItem disabled>
-                Parallel branch (coming soon)
+              <MenuItem onClick={() => { this.closeSplitMenu(); this.props.onAddParallelChain?.(); }}>
+                Parallel branch
               </MenuItem>
             </Menu>
           </>

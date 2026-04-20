@@ -596,6 +596,9 @@ export class Pedalboard implements Deserializable<Pedalboard> {
         } else {
             this.routingGraph = RoutingGraph.fromItems(this.items, this.name);
         }
+        this.parallelChains = (input.parallelChains ?? []).map(
+            (chain: any[]) => PedalboardItem.deserializeArray(chain)
+        );
         return this;
     }
 
@@ -613,6 +616,7 @@ export class Pedalboard implements Deserializable<Pedalboard> {
     pathProperties: {[Name: string]: string} = {};
     selectedPlugin: number = -1;
     routingGraph: RoutingGraph = new RoutingGraph();
+    parallelChains: PedalboardItem[][] = [];
 
     // Exclude routingGraph from JSON serialization — server rebuilds it from items_.
     toJSON(): object {
@@ -623,21 +627,35 @@ export class Pedalboard implements Deserializable<Pedalboard> {
     // yields all items in the pedalboard, including split items. Splits are yielded before their children.
     *itemsGenerator(): Generator<PedalboardItem, void, undefined> {
         let it = itemGenerator_(this.items);
-        while (true)
-        {
+        while (true) {
             let v = it.next();
             if (v.done) break;
             yield v.value;
+        }
+        for (const chain of this.parallelChains) {
+            it = itemGenerator_(chain);
+            while (true) {
+                let v = it.next();
+                if (v.done) break;
+                yield v.value;
+            }
         }
     }
     // same as itemsGenerator, but yields split items after their chains.
     *itemsGeneratorSplitAfter(): Generator<PedalboardItem, void, undefined> {
         let it = itemGeneratorSplitAfter_(this.items);
-        while (true)
-        {
+        while (true) {
             let v = it.next();
             if (v.done) break;
             yield v.value;
+        }
+        for (const chain of this.parallelChains) {
+            it = itemGeneratorSplitAfter_(chain);
+            while (true) {
+                let v = it.next();
+                if (v.done) break;
+                yield v.value;
+            }
         }
     }
 
@@ -825,19 +843,52 @@ export class Pedalboard implements Deserializable<Pedalboard> {
 
     collapseSplitContaining(instanceId: number): number
     {
-        const result = this.collapseSplitContaining_(instanceId, this.items);
-        if (result === null || result === -1) {
-            // fallback: just replace with empty
-            const newItem = this.createEmptyItem();
-            this.items = [newItem];
-            return newItem.instanceId;
+        let result = this.collapseSplitContaining_(instanceId, this.items);
+        if (result !== null && result !== -1) return result;
+        for (const chain of this.parallelChains) {
+            result = this.collapseSplitContaining_(instanceId, chain);
+            if (result !== null && result !== -1) return result;
         }
-        return result;
+        // fallback: just replace with empty
+        const newItem = this.createEmptyItem();
+        this.items = [newItem];
+        return newItem.instanceId;
     }
 
     isOnlyItemInSplitBranch(instanceId: number): boolean
     {
-        return this.isOnlyItemInSplitBranch_(instanceId, this.items);
+        if (this.isOnlyItemInSplitBranch_(instanceId, this.items)) return true;
+        for (const chain of this.parallelChains) {
+            if (this.isOnlyItemInSplitBranch_(instanceId, chain)) return true;
+        }
+        return false;
+    }
+
+    isOnlyItemInParallelChain(instanceId: number): boolean
+    {
+        for (const chain of this.parallelChains) {
+            if (chain.length === 1 && chain[0].instanceId === instanceId) return true;
+        }
+        return false;
+    }
+
+    removeParallelChainContaining(instanceId: number): number
+    {
+        const fallback = this.items[0]?.instanceId ?? -1;
+        for (let i = 0; i < this.parallelChains.length; ++i) {
+            if (this.parallelChains[i].some(item => item.instanceId === instanceId)) {
+                this.parallelChains.splice(i, 1);
+                return fallback;
+            }
+        }
+        return fallback;
+    }
+
+    addParallelChain(): number
+    {
+        const emptyItem = this.createEmptyItem();
+        this.parallelChains.push([emptyItem]);
+        return emptyItem.instanceId;
     }
 
     private isOnlyItemInSplitBranch_(instanceId: number, items: PedalboardItem[]): boolean
@@ -853,13 +904,24 @@ export class Pedalboard implements Deserializable<Pedalboard> {
         return false;
     }
 
-    canDeleteItem(instanceId: number): boolean 
+    canDeleteItem(instanceId: number): boolean
     {
-        return this.canDeleteItem_(instanceId,this.items);
+        if (this.isOnlyItemInParallelChain(instanceId)) return true;
+        if (this.canDeleteItem_(instanceId, this.items)) return true;
+        for (const chain of this.parallelChains) {
+            if (this.canDeleteItem_(instanceId, chain)) return true;
+        }
+        return false;
     }
     // Returns the next selected instanceId, or null if no deletion occurred.
     deleteItem(instanceId: number): number | null {
-        return this.deleteItem_(instanceId,this.items);
+        let result = this.deleteItem_(instanceId, this.items);
+        if (result !== null) return result;
+        for (const chain of this.parallelChains) {
+            result = this.deleteItem_(instanceId, chain);
+            if (result !== null) return result;
+        }
+        return null;
     }
 
     setMidiBinding(instanceId: number, midiBinding: MidiBinding): boolean
@@ -911,20 +973,26 @@ export class Pedalboard implements Deserializable<Pedalboard> {
     addBefore(item: PedalboardItem, instanceId: number)
     {
         if (item.instanceId === instanceId) return;
-        let result = Pedalboard._addRelative(this.items,item, instanceId, true);
+        let result = Pedalboard._addRelative(this.items, item, instanceId, true);
         if (!result) {
-            throw new PiPedalArgumentError("instanceId not found.");
+            for (const chain of this.parallelChains) {
+                result = Pedalboard._addRelative(chain, item, instanceId, true);
+                if (result) break;
+            }
         }
-
+        if (!result) throw new PiPedalArgumentError("instanceId not found.");
     }
     addAfter(item: PedalboardItem, instanceId: number)
     {
         if (item.instanceId === instanceId) return;
-        let result = Pedalboard._addRelative(this.items,item, instanceId, false);
+        let result = Pedalboard._addRelative(this.items, item, instanceId, false);
         if (!result) {
-            throw new PiPedalArgumentError("instanceId not found.");
+            for (const chain of this.parallelChains) {
+                result = Pedalboard._addRelative(chain, item, instanceId, false);
+                if (result) break;
+            }
         }
-
+        if (!result) throw new PiPedalArgumentError("instanceId not found.");
     }
     
     ensurePedalboardIds() {
@@ -1021,11 +1089,14 @@ export class Pedalboard implements Deserializable<Pedalboard> {
     
     replaceItem(instanceId: number, newItem: PedalboardItem)
     {
-        let result = this._replaceItem(this.items,instanceId,newItem);
-        if (!result)
-        {
-            throw new PiPedalArgumentError("instanceId not found.");
+        let result = this._replaceItem(this.items, instanceId, newItem);
+        if (!result) {
+            for (const chain of this.parallelChains) {
+                result = this._replaceItem(chain, instanceId, newItem);
+                if (result) break;
+            }
         }
+        if (!result) throw new PiPedalArgumentError("instanceId not found.");
     }
     private _addItem(items: PedalboardItem[], newItem: PedalboardItem, instanceId: number, append: boolean)
     {
@@ -1054,7 +1125,10 @@ export class Pedalboard implements Deserializable<Pedalboard> {
 
     addItem(newItem: PedalboardItem, instanceId: number, append: boolean): void
     {
-        this._addItem(this.items,newItem,instanceId,append);
+        if (this._addItem(this.items, newItem, instanceId, append)) return;
+        for (const chain of this.parallelChains) {
+            if (this._addItem(chain, newItem, instanceId, append)) return;
+        }
     }
 
 }

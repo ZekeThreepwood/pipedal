@@ -431,7 +431,17 @@ export const MainPage = withTheme(
 
       isChainStart(instanceId: number): boolean {
         const pedalboard = this.model.pedalboard.get();
-        return this.isFirstInChain(pedalboard.items, instanceId);
+        if (this.isFirstInChain(pedalboard.items, instanceId)) return true;
+        for (const chain of pedalboard.parallelChains ?? []) {
+          if (this.isFirstInChain(chain, instanceId)) return true;
+        }
+        return false;
+      }
+
+      onAddParallelChain() {
+        const newId = this.model.addParallelChain();
+        this.setSelection(newId);
+        this.setState({ loadDialogOpen: true });
       }
 
       isFirstInChain(items: PedalboardItem[], instanceId: number): boolean {
@@ -1000,6 +1010,7 @@ export const MainPage = withTheme(
               onAddAfter={(id: number) => this.onAddBlockAfter(id)}
               onSplitAfter={(id: number) => this.onAppendSplit(id)}
               onMergeAfter={(parentSplitId: number) => this.onMergeAfterSplit(parentSplitId)}
+              onAddParallelChain={() => this.onAddParallelChain()}
               onCloseDisplayName={() =>
                 this.setState({ displayNameDialogOpen: false })
               }
@@ -1045,6 +1056,7 @@ export const MainPage = withTheme(
                 onAddAfter={(id) => this.onAddBlockAfter(id)}
                 onSplitAfter={(id) => this.onAppendSplit(id)}
                 onMergeAfter={(parentSplitId) => this.onMergeAfterSplit(parentSplitId)}
+                onAddParallelChain={() => this.onAddParallelChain()}
               />
             </div>
 
