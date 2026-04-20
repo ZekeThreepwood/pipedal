@@ -1,4 +1,4 @@
-import React, { SyntheticEvent } from 'react';
+import React from 'react';
 import { Theme } from '@mui/material/styles';
 import { css } from '@emotion/react';
 import { withStyles } from 'tss-react/mui';
@@ -12,14 +12,9 @@ import PluginNameDialog from './PluginNameDialog';
 import IconButtonEx from './IconButtonEx';
 
 import InputIcon from '@mui/icons-material/Input';
-import AddIcon from '@mui/icons-material/Add';
 import CameraAltOutlinedIcon from '@mui/icons-material/CameraAltOutlined';
 import ArrowBackIosNewIcon from '@mui/icons-material/ArrowBackIosNew';
 import ArrowForwardIosIcon from '@mui/icons-material/ArrowForwardIos';
-import Menu from '@mui/material/Menu';
-import MenuItem from '@mui/material/MenuItem';
-import Fade from '@mui/material/Fade';
-import Divider from '@mui/material/Divider';
 
 import MidiIcon from "./svg/ic_midi.svg?react";
 import OldDeleteIcon from "./svg/old_delete_outline_24dp.svg?react";
@@ -115,7 +110,6 @@ const styles = (_theme: Theme) => {
 };
 
 interface MainPageSmallScreenState {
-    addMenuAnchorEl: HTMLElement | null;
     canScrollLeft: boolean;
     canScrollRight: boolean;
 }
@@ -165,6 +159,8 @@ export interface MainPageSmallScreenProps extends WithStyles<typeof styles> {
     onAppendPedal: (instanceId: number) => void;
     onInsertSplit: (instanceId: number) => void;
     onAppendSplit: (instanceId: number) => void;
+    onAddAfter: (instanceId: number) => void;
+    onSplitAfter: (instanceId: number) => void;
 
     onCloseDisplayName: () => void;
     onApplyDisplayName: (newName: string, color: string) => void;
@@ -182,7 +178,6 @@ const MainPageSmallScreen = withStyles(
         constructor(props: MainPageSmallScreenProps) {
             super(props);
             this.state = {
-                addMenuAnchorEl: null,
                 canScrollLeft: false,
                 canScrollRight: false,
             };
@@ -248,14 +243,6 @@ const MainPageSmallScreen = withStyles(
             }
         }
 
-        private handleAddClick(e: SyntheticEvent) {
-            this.setState({ addMenuAnchorEl: e.currentTarget as HTMLElement });
-        }
-
-        private handleAddClose() {
-            this.setState({ addMenuAnchorEl: null });
-        }
-
         render() {
             const classes = withStyles.getClasses(this.props);
 
@@ -268,8 +255,6 @@ const MainPageSmallScreen = withStyles(
                 snapshotDialogOpen,
                 displayNameDialogOpen,
                 enableStructureEditing,
-                canInsert,
-                canAppend,
                 canLoad,
                 canDelete,
                 instanceId,
@@ -283,10 +268,8 @@ const MainPageSmallScreen = withStyles(
                 onOpenMidi,
                 onOpenSnapshot,
                 onDeletePedal,
-                onInsertPedal,
-                onAppendPedal,
-                onInsertSplit,
-                onAppendSplit,
+                onAddAfter,
+                onSplitAfter,
                 onCloseDisplayName,
                 onApplyDisplayName,
                 getSelectedUri,
@@ -309,6 +292,8 @@ const MainPageSmallScreen = withStyles(
                                 onSelectionChanged={onSelectionChanged}
                                 onDoubleClick={onPedalDoubleClick}
                                 hasTinyToolBar={true}
+                                onAddAfter={onAddAfter}
+                                onSplitAfter={onSplitAfter}
                             />
                             <div className={classes.pedalboardEdgeSpacer} />
                         </div>
@@ -330,60 +315,6 @@ const MainPageSmallScreen = withStyles(
                                         </IconButtonEx>
                                     </div>
                                 )}
-
-                                {/* Add button */}
-                                <div style={{ flex: "0 0 auto" }}>
-                                    <IconButtonEx
-                                        tooltip="Add pedal slot"
-                                        onClick={(e) => { this.handleAddClick(e); }}
-                                        size="large"
-                                    >
-                                        <AddIcon style={ICON_STYLE} />
-                                    </IconButtonEx>
-
-                                    <Menu
-                                        id="small-screen-add-menu"
-                                        anchorEl={this.state.addMenuAnchorEl}
-                                        keepMounted
-                                        open={Boolean(this.state.addMenuAnchorEl)}
-                                        onClose={() => this.handleAddClose()}
-                                        TransitionComponent={Fade}
-                                    >
-                                        {canInsert && (
-                                            <MenuItem onClick={() => {
-                                                this.handleAddClose();
-                                                onInsertPedal(instanceId);
-                                            }}>
-                                                Insert pedal
-                                            </MenuItem>
-                                        )}
-                                        {canAppend && (
-                                            <MenuItem onClick={() => {
-                                                this.handleAddClose();
-                                                onAppendPedal(instanceId);
-                                            }}>
-                                                Append pedal
-                                            </MenuItem>
-                                        )}
-                                        <Divider />
-                                        {canInsert && (
-                                            <MenuItem onClick={() => {
-                                                this.handleAddClose();
-                                                onInsertSplit(instanceId);
-                                            }}>
-                                                Insert split
-                                            </MenuItem>
-                                        )}
-                                        {canAppend && (
-                                            <MenuItem onClick={() => {
-                                                this.handleAddClose();
-                                                onAppendSplit(instanceId);
-                                            }}>
-                                                Append split
-                                            </MenuItem>
-                                        )}
-                                    </Menu>
-                                </div>
 
                                 {/* Delete button */}
                                 <div style={{ flex: "0 0 auto", display: canDelete ? "block" : "none" }}>

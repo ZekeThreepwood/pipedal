@@ -962,6 +962,8 @@ export const MainPage = withTheme(
               onAppendSplit={(targetInstanceId: number) =>
                 this.onAppendSplit(targetInstanceId)
               }
+              onAddAfter={(id: number) => this.onAddBlockAfter(id)}
+              onSplitAfter={(id: number) => this.onAppendSplit(id)}
               onCloseDisplayName={() =>
                 this.setState({ displayNameDialogOpen: false })
               }

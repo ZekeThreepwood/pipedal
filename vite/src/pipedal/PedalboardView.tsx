@@ -27,7 +27,6 @@ import IconButton from "@mui/material/IconButton";
 import Menu from "@mui/material/Menu";
 import MenuItem from "@mui/material/MenuItem";
 import AddIcon from "@mui/icons-material/Add";
-import AccountTreeIcon from "@mui/icons-material/AccountTree";
 
 import { Theme } from "@mui/material/styles";
 import { PiPedalModel, PiPedalModelFactory } from "./PiPedalModel";
@@ -1654,7 +1653,7 @@ const PedalboardView = withTheme(
                             style={{ width: 24, height: 24, background: this.props.theme.palette.background.paper, border: "1px solid #888" }}
                             onClick={(e) => this.openSplitMenu(e, blockInstanceId)}
                           >
-                            <AccountTreeIcon style={{ width: 16, height: 16 }} />
+                            <AddIcon style={{ width: 16, height: 16 }} />
                           </IconButton>
                         </div>
                       </>
@@ -1889,7 +1888,7 @@ const PedalboardView = withTheme(
               open={Boolean(this.state.splitMenuAnchor)}
               onClose={this.closeSplitMenu}
             >
-              <MenuItem onClick={() => { this.closeSplitMenu(); this.props.onSplitAfter?.(this.state.splitMenuInstanceId); }}>
+              <MenuItem onClick={() => { const id = this.state.splitMenuInstanceId; this.closeSplitMenu(); this.props.onSplitAfter?.(id); }}>
                 Split chain
               </MenuItem>
               <MenuItem disabled>
