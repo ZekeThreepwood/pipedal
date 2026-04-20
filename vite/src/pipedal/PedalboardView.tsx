@@ -23,6 +23,11 @@ import { createStyles } from "./WithStyles";
 
 import WithStyles, { withTheme } from "./WithStyles";
 import { withStyles } from "tss-react/mui";
+import IconButton from "@mui/material/IconButton";
+import Menu from "@mui/material/Menu";
+import MenuItem from "@mui/material/MenuItem";
+import AddIcon from "@mui/icons-material/Add";
+import AccountTreeIcon from "@mui/icons-material/AccountTree";
 
 import { Theme } from "@mui/material/styles";
 import { PiPedalModel, PiPedalModelFactory } from "./PiPedalModel";
@@ -221,6 +226,8 @@ interface PedalboardProps extends WithStyles<typeof pedalboardStyles> {
   onDoubleClick?: OnSelectHandler;
   hasTinyToolBar: boolean;
   enableStructureEditing: boolean;
+  onAddAfter?: (instanceId: number) => void;
+  onSplitAfter?: (instanceId: number) => void;
 }
 interface LayoutSize {
   width: number;
@@ -229,6 +236,8 @@ interface LayoutSize {
 
 type PedalboardState = {
   pedalboard?: Pedalboard;
+  splitMenuAnchor: HTMLElement | null;
+  splitMenuInstanceId: number;
 };
 
 const EMPTY_PEDALS: PedalLayout[] = [];
@@ -428,16 +437,28 @@ const PedalboardView = withTheme(
         if (!props.selectedId) props.selectedId = -1;
         this.state = {
           pedalboard: this.model.pedalboard.get(),
+          splitMenuAnchor: null,
+          splitMenuInstanceId: -1,
         };
         this.onPedalboardChanged = this.onPedalboardChanged.bind(this);
         this.frameRef = React.createRef();
         this.scrollRef = React.createRef();
         this.handleTouchStart = this.handleTouchStart.bind(this);
+        this.openSplitMenu = this.openSplitMenu.bind(this);
+        this.closeSplitMenu = this.closeSplitMenu.bind(this);
       }
 
       handleTouchStart(e: any) {
         // just has to exist to allow Draggable to receive
         // touchyMove. :-/
+      }
+
+      openSplitMenu(e: React.MouseEvent<HTMLElement>, instanceId: number) {
+        e.stopPropagation();
+        this.setState({ splitMenuAnchor: e.currentTarget, splitMenuInstanceId: instanceId });
+      }
+      closeSplitMenu() {
+        this.setState({ splitMenuAnchor: null, splitMenuInstanceId: -1 });
       }
 
       onDragEnd(instanceId: number, clientX: number, clientY: number) {
@@ -1595,6 +1616,8 @@ const PedalboardView = withTheme(
                   pluginType = PluginType.NamPlugin;
                 }
 
+                const blockInstanceId = item.pedalItem?.instanceId ?? -1;
+                const isSelected = blockInstanceId === this.props.selectedId;
                 result.push(
                   <div
                     key={this.renderKey++}
@@ -1602,7 +1625,7 @@ const PedalboardView = withTheme(
                     style={{ left: item.bounds.x, top: item.bounds.y }}
                   >
                     {this.pedalButton(
-                      item.pedalItem?.instanceId ?? -1,
+                      blockInstanceId,
                       pluginType,
                       item.pedalItem?.iconColor ?? "",
                       !item.isEmpty(),
@@ -1613,6 +1636,28 @@ const PedalboardView = withTheme(
                         ? uiPlugin.has_midi_input !== 0 ||
                             uiPlugin.has_midi_output !== 0
                         : false,
+                    )}
+                    {isSelected && this.props.enableStructureEditing && (
+                      <>
+                        <div style={{ position: "absolute", right: -12, top: CELL_HEIGHT / 2 - 12, zIndex: 20 }}>
+                          <IconButton
+                            size="small"
+                            style={{ width: 24, height: 24, background: this.props.theme.palette.background.paper, border: "1px solid #888" }}
+                            onClick={(e) => { e.stopPropagation(); this.props.onAddAfter?.(blockInstanceId); }}
+                          >
+                            <AddIcon style={{ width: 16, height: 16 }} />
+                          </IconButton>
+                        </div>
+                        <div style={{ position: "absolute", bottom: -12, left: CELL_WIDTH / 2 - 12, zIndex: 20 }}>
+                          <IconButton
+                            size="small"
+                            style={{ width: 24, height: 24, background: this.props.theme.palette.background.paper, border: "1px solid #888" }}
+                            onClick={(e) => this.openSplitMenu(e, blockInstanceId)}
+                          >
+                            <AccountTreeIcon style={{ width: 16, height: 16 }} />
+                          </IconButton>
+                        </div>
+                      </>
                     )}
                   </div>,
                 );
@@ -1826,18 +1871,32 @@ const PedalboardView = withTheme(
         this.currentLayout = layoutChain; // save for mouse processing &c.
 
         return (
-          <div className={classes.scrollContainer} ref={this.scrollRef}>
-            <div
-              className={classes.container}
-              ref={this.frameRef}
-              style={{
-                width: layoutSize.width,
-                height: layoutSize.height,
-              }}
-            >
-              {this.renderChain(layoutChain, layoutSize)}
+          <>
+            <div className={classes.scrollContainer} ref={this.scrollRef}>
+              <div
+                className={classes.container}
+                ref={this.frameRef}
+                style={{
+                  width: layoutSize.width,
+                  height: layoutSize.height,
+                }}
+              >
+                {this.renderChain(layoutChain, layoutSize)}
+              </div>
             </div>
-          </div>
+            <Menu
+              anchorEl={this.state.splitMenuAnchor}
+              open={Boolean(this.state.splitMenuAnchor)}
+              onClose={this.closeSplitMenu}
+            >
+              <MenuItem onClick={() => { this.closeSplitMenu(); this.props.onSplitAfter?.(this.state.splitMenuInstanceId); }}>
+                Split chain
+              </MenuItem>
+              <MenuItem disabled>
+                Parallel branch (coming soon)
+              </MenuItem>
+            </Menu>
+          </>
         );
       }
     },

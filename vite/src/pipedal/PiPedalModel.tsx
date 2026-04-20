@@ -1892,6 +1892,11 @@ export class PiPedalModel //implements PiPedalModel
 
         let result = newPedalboard.deleteItem(instanceId);
         if (result !== null) {
+            if (newPedalboard.items.length === 0) {
+                const empty = newPedalboard.createEmptyItem();
+                newPedalboard.items.push(empty);
+                result = empty.instanceId;
+            }
             newPedalboard.selectedPlugin = result;
             this.pruneSnapshotValues(newPedalboard);
             this.setModelPedalboard(newPedalboard);

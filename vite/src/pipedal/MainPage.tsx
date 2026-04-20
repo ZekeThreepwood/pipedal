@@ -246,6 +246,12 @@ export const MainPage = withTheme(
         this.setSelection(newId);
       }
 
+      onAddBlockAfter(instanceId: number) {
+        const newId = this.model.addPedalboardItem(instanceId, true);
+        this.setSelection(newId);
+        this.setState({ loadDialogOpen: true });
+      }
+
       onInsertSplit(instanceId: number) {
         this.setAddMenuAnchorEl(null);
         const newId = this.model.addPedalboardSplitItem(instanceId, false);
@@ -997,6 +1003,8 @@ export const MainPage = withTheme(
                 onSelectionChanged={this.onSelectionChanged}
                 onDoubleClick={this.onPedalDoubleClick}
                 hasTinyToolBar={this.props.hasTinyToolBar}
+                onAddAfter={(id) => this.onAddBlockAfter(id)}
+                onSplitAfter={(id) => this.onAppendSplit(id)}
               />
             </div>
 
