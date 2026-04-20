@@ -22,8 +22,10 @@ import { PiPedalModel, PiPedalModelFactory } from './PiPedalModel';
 
 
 import { PedalboardItem, PedalboardSplitItem } from './Pedalboard';
+import { INPUT_BOX_MONO_URI, INPUT_BOX_STEREO_URI, OUTPUT_BOX_MONO_URI, OUTPUT_BOX_STEREO_URI } from './Lv2Plugin';
 import PluginControlView from './PluginControlView';
 import SplitControlView from './SplitControlView';
+import InputOutputBoxControlView from './InputOutputBoxControlView';
 import Typography from '@mui/material/Typography';
 import IControlViewFactory from './IControlViewFactory';
 import { GxTunerViewFactory } from './GxTunerView';
@@ -74,7 +76,21 @@ export function GetControlView(
             <SplitControlView item={pedalboardItem as PedalboardSplitItem} instanceId={pedalboardItem!.instanceId}
             />
         );
-    } else {
+    }
+    const uri = pedalboardItem.uri;
+    if (uri === INPUT_BOX_MONO_URI) {
+        return <InputOutputBoxControlView instanceId={pedalboardItem.instanceId} item={pedalboardItem} isInput={true} channelCount={1} />;
+    }
+    if (uri === INPUT_BOX_STEREO_URI) {
+        return <InputOutputBoxControlView instanceId={pedalboardItem.instanceId} item={pedalboardItem} isInput={true} channelCount={2} />;
+    }
+    if (uri === OUTPUT_BOX_MONO_URI) {
+        return <InputOutputBoxControlView instanceId={pedalboardItem.instanceId} item={pedalboardItem} isInput={false} channelCount={1} />;
+    }
+    if (uri === OUTPUT_BOX_STEREO_URI) {
+        return <InputOutputBoxControlView instanceId={pedalboardItem.instanceId} item={pedalboardItem} isInput={false} channelCount={2} />;
+    }
+    {
         for (let i = 0; i < pluginFactories.length; ++i) {
             let factory = pluginFactories[i];
             if (factory.uri === pedalboardItem.uri) {

@@ -119,6 +119,7 @@ public:
 
     // Input-specific fields (valid when type == BoxType::Input).
     int inputChannelCount = 1;    // 1 = mono, 2 = stereo
+    int inputStartChannel = 0;    // 0-based index of first hardware input channel
 
     // Merge/Ab-specific: user-controlled mix parameters.
     // For implicit fan-in these are ignored; compensation is automatic.

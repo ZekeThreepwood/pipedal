@@ -257,19 +257,27 @@ void Pedalboard::BuildRoutingGraphFromItems(
             float splitTypeVal = cv ? cv->value() : 0.0f;
             box->type = (splitTypeVal == 0.0f) ? BoxType::Ab : BoxType::Merge;
         }
-        else if (item.uri() == OUTPUT_PEDALBOARD_ITEM_URI)
+        else if (item.uri() == OUTPUT_PEDALBOARD_ITEM_URI ||
+                 item.uri() == OUTPUT_PEDALBOARD_ITEM_URI_MONO ||
+                 item.uri() == OUTPUT_PEDALBOARD_ITEM_URI_STEREO)
         {
             box->type = BoxType::Output;
+            for (const auto& cv : item.controlValues())
+                if (cv.key() == "outputChannel") { box->outputChannelIndex = (int)cv.value(); break; }
         }
         else if (item.uri() == INPUT_PEDALBOARD_ITEM_URI_MONO)
         {
             box->type = BoxType::Input;
             box->inputChannelCount = 1;
+            for (const auto& cv : item.controlValues())
+                if (cv.key() == "inputChannel") { box->inputStartChannel = (int)cv.value(); break; }
         }
         else if (item.uri() == INPUT_PEDALBOARD_ITEM_URI_STEREO)
         {
             box->type = BoxType::Input;
             box->inputChannelCount = 2;
+            for (const auto& cv : item.controlValues())
+                if (cv.key() == "inputChannel") { box->inputStartChannel = (int)cv.value(); break; }
         }
         else
         {
@@ -318,7 +326,9 @@ void Pedalboard::RebuildRoutingGraph()
     std::function<bool(const std::vector<PedalboardItem>&)> hasOutputItem;
     hasOutputItem = [&](const std::vector<PedalboardItem>& items) -> bool {
         for (const auto& i : items) {
-            if (i.uri() == OUTPUT_PEDALBOARD_ITEM_URI) return true;
+            if (i.uri() == OUTPUT_PEDALBOARD_ITEM_URI ||
+                i.uri() == OUTPUT_PEDALBOARD_ITEM_URI_MONO ||
+                i.uri() == OUTPUT_PEDALBOARD_ITEM_URI_STEREO) return true;
             if (i.isSplit() &&
                 (hasOutputItem(i.topChain()) || hasOutputItem(i.bottomChain())))
                 return true;

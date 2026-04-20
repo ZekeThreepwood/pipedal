@@ -33,9 +33,11 @@ namespace pipedal {
     
 #define SPLIT_PEDALBOARD_ITEM_URI       "uri://two-play/pipedal/pedalboard#Split"
 #define EMPTY_PEDALBOARD_ITEM_URI       "uri://two-play/pipedal/pedalboard#Empty"
-#define OUTPUT_PEDALBOARD_ITEM_URI      "uri://two-play/pipedal/pedalboard#Output"
-#define INPUT_PEDALBOARD_ITEM_URI_MONO  "uri://two-play/pipedal/pedalboard#InputMono"
-#define INPUT_PEDALBOARD_ITEM_URI_STEREO "uri://two-play/pipedal/pedalboard#InputStereo"
+#define OUTPUT_PEDALBOARD_ITEM_URI        "uri://two-play/pipedal/pedalboard#Output"
+#define OUTPUT_PEDALBOARD_ITEM_URI_MONO   "uri://two-play/pipedal/pedalboard#OutputMono"
+#define OUTPUT_PEDALBOARD_ITEM_URI_STEREO "uri://two-play/pipedal/pedalboard#OutputStereo"
+#define INPUT_PEDALBOARD_ITEM_URI_MONO    "uri://two-play/pipedal/pedalboard#InputMono"
+#define INPUT_PEDALBOARD_ITEM_URI_STEREO  "uri://two-play/pipedal/pedalboard#InputStereo"
 
 #define SPLIT_SPLITTYPE_KEY "splitType"
 #define SPLIT_SELECT_KEY "select"
