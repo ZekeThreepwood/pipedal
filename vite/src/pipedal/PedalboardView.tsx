@@ -26,7 +26,7 @@ import { withStyles } from "tss-react/mui";
 
 import { Theme } from "@mui/material/styles";
 import { PiPedalModel, PiPedalModelFactory } from "./PiPedalModel";
-import { PluginType, INPUT_BOX_MONO_URI, INPUT_BOX_STEREO_URI, OUTPUT_BOX_MONO_URI, OUTPUT_BOX_STEREO_URI } from "./Lv2Plugin";
+import { PluginType } from "./Lv2Plugin";
 import ButtonBase from "@mui/material/ButtonBase";
 import Typography from "@mui/material/Typography";
 import PluginIcon, { getIconColor, SelectIconUri } from "./PluginIcon";
@@ -1817,15 +1817,7 @@ const PedalboardView = withTheme(
         const classes = withStyles.getClasses(this.props);
         this.renderKey = 0;
         let layoutChain = makeChain(this.model, this.state.pedalboard?.items);
-        let start = PedalLayout.Start();
-        let end = PedalLayout.End();
         if (layoutChain.length !== 0) {
-          const firstUri = layoutChain[0].uri;
-          const lastUri = layoutChain[layoutChain.length - 1].uri;
-          const hasInputBox = firstUri === INPUT_BOX_MONO_URI || firstUri === INPUT_BOX_STEREO_URI;
-          const hasOutputBox = lastUri === OUTPUT_BOX_MONO_URI || lastUri === OUTPUT_BOX_STEREO_URI;
-          if (!hasInputBox) layoutChain.splice(0, 0, start);
-          if (!hasOutputBox) layoutChain.splice(layoutChain.length, 0, end);
           this.markStereoOutputs(layoutChain, 2, 2);
         }
 
